@@ -26,7 +26,7 @@ MCP host) connect as TCP clients.
   "projectName": "My Avatar Project",
   "pid": 12345,
   "unityVersion": "2022.3.22f1",
-  "pluginVersion": "2.4.2",
+  "pluginVersion": "2.4.3",
   "protocolV": 1,
   "startedAt": "2026-08-05T12:00:00Z",
   "token": "32-hex same-user auth token (v2.1+)"

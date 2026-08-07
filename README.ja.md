@@ -2,11 +2,31 @@
 
 [English README is here / 英語版 README](README.md)
 
+![TunaSync Unity MCP](docs/banner.png)
+
 Unity Editor を AI から操縦する MCP ブリッジ — VRChat のアバター・ワールド制作のために作られています。
 2026-08 に全面書き直し (v2)。旧 426 ツール構成のフォーク系譜は開発リポジトリの
 `legacy-v1` ブランチにあり、このリリースには含まれません。
 
 > 非公式のコミュニティツールです。VRChat 社・Unity 社とは無関係です。
+
+## クイックスタート
+
+**1 — Unity 側 (VCC):** このリポジトリを追加して ([ワンクリック追加ページ](https://tunasync-studio.github.io/UnityMCP-VCC/))、**TunaSync Unity MCP** をプロジェクトに導入:
+
+```
+https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json
+```
+
+**2 — AI 側 (MCP クライアント・Node 20+):**
+
+```bash
+claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
+```
+
+**3 —** プロジェクトを開いて初回の同意ダイアログを承認 (`Tools > TunaSync Unity MCP > Status Window`)、AI に `unity_health_check` を頼んで接続を確認。
+
+詳細 (UPM 経路・手動 MCP 設定・実アップロードの arm): `docs/INSTALL.ja.md`。
 
 ## アーキテクチャ
 

@@ -3,6 +3,29 @@
 Format: [Keep a Changelog](https://keepachangelog.com/). Versions tag the
 repo as `v2.x.y`; server and package move in lockstep.
 
+## [2.4.3] - 2026-08-08
+
+### Fixed
+- **VPM zip separators**: entries were stored with `\` (PowerShell
+  Compress-Archive default), violating ZIP spec 4.4.17.1. Windows VCC and
+  vrc-get/ALCOM (which normalizes separators on extract) were unaffected;
+  strict extractors on macOS/Linux could flatten paths. The repo build now
+  zips via `tar --format zip` and refuses to ship a zip containing `\`
+  entries.
+- **License detection**: the provenance note appended after the MIT text in
+  `LICENSE` made GitHub report the license as NOASSERTION. `LICENSE` is now
+  the pristine MIT text; the note lives in `NOTICE.md`.
+- `npm run typecheck` (`tsc --noEmit`) is clean again — strict-null fixes
+  in `vcc.ts` and `test/vcc.test.ts` (the shipped sources are what
+  downstream users typecheck).
+
+### Added
+- GitHub Pages landing page with an Add-to-VCC deep link (the Pages root
+  was a 404).
+- README quickstart + banner (EN/JA).
+- `build-vpm-repo.mjs --prev <index.json>` merges already-published
+  versions so the VPM listing keeps its history.
+
 ## [2.4.2] - 2026-08-07
 
 ### Added

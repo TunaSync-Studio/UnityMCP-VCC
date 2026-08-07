@@ -2,10 +2,30 @@
 
 [日本語版 README はこちら / Japanese README](README.ja.md)
 
+![TunaSync Unity MCP — MCP bridge for the Unity Editor](docs/banner.png)
+
 MCP bridge for driving the Unity Editor — built for VRChat avatar/world work.
 Ground-up rewrite (2026-08); the legacy 426-tool fork lineage is kept on the
 development repository's `legacy-v1` branch (tag `v1-final`) and is not part
 of this release tree.
+
+## Quickstart
+
+**1 — Unity side (VCC):** add this repository ([one-click page](https://tunasync-studio.github.io/UnityMCP-VCC/)) and install **TunaSync Unity MCP** into your project:
+
+```
+https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json
+```
+
+**2 — AI side (MCP client, Node 20+):**
+
+```bash
+claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
+```
+
+**3 —** open the Unity project, approve the one-time consent dialog, check `Tools > TunaSync Unity MCP > Status Window`, then ask your assistant for `unity_health_check`.
+
+Details (UPM path, manual MCP config, arming real uploads): `docs/INSTALL.md`.
 
 ## Architecture
 

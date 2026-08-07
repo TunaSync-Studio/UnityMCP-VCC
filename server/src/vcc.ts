@@ -44,7 +44,7 @@ function readUnityVersion(projectPath: string): string | null {
       "utf8",
     );
     const m = /m_EditorVersion:\s*(\S+)/.exec(t);
-    return m ? m[1] : null;
+    return m?.[1] ?? null;
   } catch {
     return null;
   }

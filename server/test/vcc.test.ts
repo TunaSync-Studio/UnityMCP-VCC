@@ -60,7 +60,8 @@ describe("vcc file reads", () => {
       );
       const out = listProjects(settings);
       expect(out.projects).toHaveLength(2);
-      const [a, b] = out.projects;
+      const a = out.projects[0]!;
+      const b = out.projects[1]!;
       expect(a.name).toBe("RealProject");
       expect(a.exists).toBe(true);
       expect(a.unityVersion).toBe("2022.3.22f1");
@@ -82,7 +83,7 @@ describe("vcc file reads", () => {
         "com.vrchat.avatars",
         "com.vrchat.base",
       ]);
-      expect(info.packages[0].locked).toBe("3.10.3");
+      expect(info.packages[0]!.locked).toBe("3.10.3");
       expect(info.legacyAssetsFolders).toEqual(["UnityMCPPlugin"]);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
