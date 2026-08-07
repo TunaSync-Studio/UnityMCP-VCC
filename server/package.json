@@ -15,7 +15,8 @@
     "build",
     "recipes",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE.md"
   ],
   "keywords": [
     "mcp",
