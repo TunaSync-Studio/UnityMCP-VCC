@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UnityMCP-VCC — TunaSync Unity MCP</title>
+<meta name="description" content="MCP bridge for driving the Unity Editor — built for VRChat avatar/world creation. C# eval, 400+ recipes, NDMF bakes, gated VRChat uploads, editorless VCC/VPM tools.">
+<meta property="og:title" content="UnityMCP-VCC — TunaSync Unity MCP">
+<meta property="og:description" content="MCP bridge for the Unity Editor, built for VRChat creators. 15 tools + 412 recipes, multi-client, MIT.">
+<meta property="og:image" content="https://tunasync-studio.github.io/UnityMCP-VCC/banner.png">
+<meta property="og:url" content="https://tunasync-studio.github.io/UnityMCP-VCC/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d1117;color:#e6edf3;font:16px/1.6 -apple-system,"Segoe UI",Meiryo,sans-serif;display:flex;justify-content:center;padding:48px 16px}
+  main{max-width:760px;width:100%}
+  img.banner{width:100%;border-radius:12px;border:1px solid #30363d;display:block}
+  h1{font-size:28px;margin:24px 0 4px}
+  h1 span{color:#9198a1;font-weight:400}
+  .sub{color:#9198a1;margin-bottom:24px}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px 24px;margin:16px 0}
+  .card h2{font-size:14px;color:#9198a1;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+  .btn{display:inline-block;background:#238636;color:#fff;font-weight:600;padding:12px 22px;border-radius:8px;text-decoration:none;font-size:17px}
+  .btn:hover{background:#2ea043;text-decoration:none}
+  .urlrow{display:flex;gap:8px;margin-top:12px}
+  .urlrow input{flex:1;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;padding:10px 12px;font:13px ui-monospace,Consolas,monospace}
+  .urlrow button{background:#21262d;border:1px solid #30363d;border-radius:8px;color:#e6edf3;padding:0 16px;cursor:pointer;font-size:14px}
+  pre{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px 14px;font:13px ui-monospace,Consolas,monospace;overflow-x:auto}
+  code{font:13px ui-monospace,Consolas,monospace;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:1px 5px}
+  .links{display:flex;flex-wrap:wrap;gap:18px}
+  a{color:#4493f8;text-decoration:none} a:hover{text-decoration:underline}
+  .note{color:#9198a1;font-size:13px;margin-top:8px}
+  footer{color:#9198a1;font-size:13px;margin-top:32px;text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <img class="banner" src="banner.png" alt="TunaSync Unity MCP — MCP bridge for the Unity Editor">
+  <h1>TunaSync Unity MCP <span>(UnityMCP-VCC)</span></h1>
+  <p class="sub">MCP bridge for driving the Unity Editor — built for VRChat avatar &amp; world creation.<br>Unity Editor を AI から操縦する MCP ブリッジ — VRChat 制作のために。</p>
+
+  <div class="card">
+    <h2>1 · Unity side — VCC / ALCOM</h2>
+    <a class="btn" href="vcc://vpm/addRepo?url=https%3A%2F%2Ftunasync-studio.github.io%2FUnityMCP-VCC%2Fvpm%2Findex.json">Add repository to VCC</a>
+    <div class="urlrow">
+      <input id="u" readonly value="https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json">
+      <button onclick="navigator.clipboard.writeText(document.getElementById('u').value);this.textContent='✓';setTimeout(()=>this.textContent='Copy',1200)">Copy</button>
+    </div>
+    <p class="note">Then install <b>TunaSync Unity MCP</b> into your project. / ボタンが反応しない場合は URL を VCC の Settings → Packages → Add Repository へ貼り付け。</p>
+  </div>
+
+  <div class="card">
+    <h2>2 · AI side — MCP client (Node 20+)</h2>
+    <pre>claude mcp add unity-mcp -- npx -y tunasync-unity-mcp</pre>
+    <p class="note">Any MCP host works (stdio). / Claude 以外の MCP ホストでも stdio 登録で動作します。</p>
+  </div>
+
+  <div class="card">
+    <h2>3 · In Unity</h2>
+    <p>Open the project → approve the one-time consent dialog → <code>Tools &gt; TunaSync Unity MCP &gt; Status Window</code> → ask your assistant for <code>unity_health_check</code>.</p>
+    <p class="note">プロジェクトを開く → 初回の同意ダイアログを承認 → Status Window → AI に <code>unity_health_check</code>。</p>
+  </div>
+
+  <div class="card links">
+    <a href="https://github.com/TunaSync-Studio/UnityMCP-VCC">GitHub</a>
+    <a href="https://github.com/TunaSync-Studio/UnityMCP-VCC/blob/main/docs/INSTALL.md">Install guide (EN)</a>
+    <a href="https://github.com/TunaSync-Studio/UnityMCP-VCC/blob/main/docs/INSTALL.ja.md">導入ガイド (JA)</a>
+    <a href="https://www.npmjs.com/package/tunasync-unity-mcp">npm</a>
+    <a href="https://github.com/TunaSync-Studio/UnityMCP-VCC/issues">Issues / feedback</a>
+  </div>
+
+  <footer>MIT © TunaSync — unofficial community tool, not affiliated with VRChat or Unity.</footer>
+</main>
+</body>
+</html>
