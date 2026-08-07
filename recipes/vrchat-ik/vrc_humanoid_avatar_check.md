@@ -1,0 +1,20 @@
+---
+name: vrc_humanoid_avatar_check
+old_tool: vrc_humanoid_avatar_check
+request_type: vrcHumanoidAvatarCheck
+description: "Humanoid Animator + Avatar valid check"
+category: vrchat-ik
+tags: [unity]
+params: []
+kind: recipe
+sync: sync
+requires: []
+qa: clean
+---
+```csharp
+// requires-using: System.IO, System.Reflection, UnityEditor.Animations
+// --- injected helper shims (from Phase11AHandler.cs) ---
+GameObject Resolve(string n) { if (!string.IsNullOrEmpty(n)) { var g = GameObject.Find(n); if (g != null) return g; } return Selection.activeGameObject; }
+// --- end shims ---
+try { var argd = args.ToObject<Dictionary<string, object>>() ?? new Dictionary<string, object>(); var avatar = Resolve(argd?.TryGetValue("avatarName", out var an) == true ? an?.ToString() : null); if (avatar == null) { return new { success = false, error = "avatar not found" };  } var anim = avatar.GetComponent<Animator>(); return new { success = true, avatar = avatar.name, hasAnimator = anim != null, isHuman = anim?.isHuman ?? false, hasAvatar = anim?.avatar != null, avatarValid = anim?.avatar?.isValid ?? false }; } catch (Exception e) { return new { success = false, error = e.Message }; }
+```

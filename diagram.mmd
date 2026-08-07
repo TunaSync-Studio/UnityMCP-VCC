@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant C as Claude (MCP client xN)
+    participant S as unity-mcp-server (stdio, per client)
+    participant P as Unity plugin (TcpListener host)
+    participant U as Unity Editor main thread
+
+    Note over P: boot: [InitializeOnLoad]<br/>bind 47700+hash%64, write registry json
+    C->>S: tools/call
+    S->>P: TCP hello {v, sessionId}
+    P-->>S: welcome {unity, eval.engine, lease}
+    S->>P: req {id, method, params, timeoutMs}
+    P->>U: MainThreadPump (50ms/tick budget)
+    U-->>P: result / progress
+    P-->>S: progress {id, pct, phase}
+    S-->>C: notifications/progress
+    P-->>S: res {id, ok, result|error}
+    S-->>C: tool result
+
+    Note over P,U: domain reload ritual:<br/>persist state -> DOMAIN_RELOAD to in-flight<br/>-> bye -> flush 250ms -> close
+    P-->>S: bye {domain_reload}
+    S->>S: degraded (hold queue, grace 180s)
+    Note over P: after reload: re-bind same port,<br/>rewrite registry, resume/void jobs
+    S->>P: reconnect + hello (same sessionId)
+    P-->>S: welcome (domainReloadCount++)
+
+    Note over S: eval = out-of-proc csc<br/>(Unity's DotNetSdkRoslyn + NetCoreRuntime)<br/>jobs = submit/wait/cancel + SessionState persist

@@ -1,0 +1,51 @@
+{
+  "name": "tunasync-unity-mcp",
+  "version": "2.4.2",
+  "description": "MCP server for driving the Unity Editor (VRChat-aware): C# eval, scene queries, NDMF bakes, VRChat uploads, logs and a built-in recipe library. Pairs with the UnityMCP editor plugin over TCP.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "build/index.js",
+  "bin": {
+    "tunasync-unity-mcp": "build/index.js"
+  },
+  "files": [
+    "build",
+    "recipes",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "unity",
+    "vrchat",
+    "claude"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TunaSync-Studio/UnityMCP-VCC.git"
+  },
+  "homepage": "https://github.com/TunaSync-Studio/UnityMCP-VCC",
+  "bugs": {
+    "url": "https://github.com/TunaSync-Studio/UnityMCP-VCC/issues"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.23.7",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  }
+}
