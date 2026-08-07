@@ -1,0 +1,40 @@
+{
+  "name": "TunaSync VPM",
+  "id": "com.tunasync.vpm",
+  "url": "https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json",
+  "author": "TunaSync",
+  "packages": {
+    "com.tunasync.unity-mcp": {
+      "versions": {
+        "2.4.2": {
+          "name": "com.tunasync.unity-mcp",
+          "displayName": "TunaSync Unity MCP",
+          "version": "2.4.2",
+          "unity": "2022.3",
+          "description": "Editor-side TCP transport that exposes the Unity Editor to MCP servers (UnityMCP v2). Hosts a loopback TcpListener with length-prefixed JSON frames, a discovery registry, compile/domain-reload aware dispatch, and a write lease.",
+          "author": {
+            "name": "TunaSync"
+          },
+          "license": "MIT",
+          "documentationUrl": "https://github.com/TunaSync-Studio/UnityMCP-VCC",
+          "changelogUrl": "https://github.com/TunaSync-Studio/UnityMCP-VCC/blob/main/CHANGELOG.md",
+          "dependencies": {
+            "com.unity.nuget.newtonsoft-json": "3.2.1"
+          },
+          "legacyFolders": {
+            "Assets\\UnityMCPPlugin": ""
+          },
+          "keywords": [
+            "mcp",
+            "claude",
+            "editor-automation",
+            "tcp",
+            "vrchat"
+          ],
+          "url": "https://tunasync-studio.github.io/UnityMCP-VCC/vpm/com.tunasync.unity-mcp-2.4.2.zip",
+          "zipSHA256": "231952BCEA01B3B7CF17A097D3B357281B62257113752608E95D8C50192204D2"
+        }
+      }
+    }
+  }
+}
