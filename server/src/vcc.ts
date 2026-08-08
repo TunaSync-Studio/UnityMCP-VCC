@@ -72,9 +72,15 @@ export function listProjects(settingsFile: string = vccSettingsPath()): {
   } catch {
     return { settingsPath: settingsFile, projects: [] };
   }
-  const parsed = JSON.parse(raw) as { userProjects?: string[] };
-  const projects = (parsed.userProjects ?? []).map(entryFor);
-  return { settingsPath: settingsFile, projects };
+  try {
+    const parsed = JSON.parse(raw) as { userProjects?: string[] };
+    const projects = (parsed.userProjects ?? []).map(entryFor);
+    return { settingsPath: settingsFile, projects };
+  } catch {
+    // VCC can briefly expose a partial file while rewriting settings.json.
+    // Reads stay non-fatal and, critically, never overwrite that file.
+    return { settingsPath: settingsFile, projects: [] };
+  }
 }
 
 /** Detailed info for one project - direct file reads, no vrc-get needed. */

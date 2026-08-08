@@ -44,7 +44,7 @@ project?"* — click **Enable**. That's the only click for that project
 (consent is per user × per project). After that the bridge starts silently
 with the editor.
 
-- Change your mind later: `Tools > TunaSync Unity MCP > Status Window`
+- Change your mind later: `Tools > TunaSync Unity MCP > Creator Console`
   (enable/disable buttons) or drop a `UnityMCP.disabled` file at the
   project root.
 - CI / headless: set the environment variable `UNITY_MCP_AUTOCONSENT=1`.
@@ -83,10 +83,20 @@ running and can be inspected with `job_status`.
 **Cursor / other MCP clients**: same command (`npx -y tunasync-unity-mcp`,
 stdio transport).
 
+The Creator Console has copy-ready Codex / Claude / Cursor tabs. A read-only
+local preflight is also available without starting an MCP session:
+
+```bash
+npx -y tunasync-unity-mcp doctor
+```
+
+Add `--json` for automation or `--verbose` to include local project names and
+paths. The default output omits those details and never prints registry tokens.
+
 ## 3. Use it
 
 1. Open your Unity project (the bridge auto-starts — check
-   `Tools > TunaSync Unity MCP > Status Window` if curious).
+   `Tools > TunaSync Unity MCP > Creator Console` if curious).
 2. Talk to your AI. `unity_health_check` confirms the link; from there:
    `execute_editor_command` (run C# in the editor), `get_editor_state`,
    `scene_query`, `camera_capture`, `find_recipe` (400+ ready-made
@@ -123,7 +133,9 @@ startedAt}` so you can always confirm which build actually answered.
 ## Arming a real VRChat upload (no repo checkout needed)
 
 A REAL `vrc_upload` needs `confirm:true` **plus** a one-shot arm file that
-you (the human) create. From a repo checkout, run
+you (the human) create. The recommended path is **Creator Console > VRC upload
+safety gate > Arm one upload**; it requires a local confirmation and there is
+no MCP-callable arm method. From a repo checkout, you can instead run
 `tools/arm-vrc-upload.bat`. Installed via VCC + npx with no checkout?
 Create the marker file yourself:
 
@@ -142,7 +154,8 @@ touched the button.
 1. **Unity側**: VCC → Settings → Packages → Add Repository → 上記URL →
    プロジェクトの Manage Project で「TunaSync Unity MCP」をインストール。
    初回起動時のダイアログで **Enable** を1回押す (それ以降は全自動)。
-2. **AI側**: `claude mcp add unity-mcp -- npx -y tunasync-unity-mcp`
+2. **AI側**: `codex mcp add unity-mcp -- npx -y tunasync-unity-mcp`
+   または `claude mcp add unity-mcp -- npx -y tunasync-unity-mcp`
    (Node.js 20+ が必要)。
 3. Unityでプロジェクトを開いて、AIに話しかけるだけ。接続確認は
-   `Tools > TunaSync Unity MCP > Status Window` (緑=接続中・日本語表示切替あり)。
+   `Tools > TunaSync Unity MCP > Creator Console` (接続process・job・compile診断も表示)。

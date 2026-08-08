@@ -31,8 +31,9 @@ function frame(obj) {
 }
 
 class Client {
-  constructor(name) {
+  constructor(name, token) {
     this.name = name;
+    this.token = token;
     this.pending = new Map();
     this.events = [];
     this.progress = new Map(); // reqId -> frames[]
@@ -86,7 +87,8 @@ class Client {
     const p = this.waitFor("__welcome__");
     this.send({ v: 1, id, type: "hello", payload: {
       v: { min: 1, max: 1 },
-      client: { name: this.name, version: "0.0.0", pid: process.pid, sessionId: this.name },
+      client: { name: this.name, version: "0.0.0", pid: process.pid,
+                sessionId: this.name, token: this.token },
       features: [],
     }});
     return (await p).payload;
@@ -120,10 +122,10 @@ async function waitRegistry(oldPid, timeoutMs) {
 
 let entry = findEntry();
 if (!entry) { console.log("NO-REGISTRY-ENTRY"); process.exit(2); }
-console.log("registry:", JSON.stringify(entry));
+console.log("registry:", JSON.stringify({ ...entry, token: entry.token ? "<redacted>" : undefined }));
 const projectRoot = entry.projectPath;
 
-let a = new Client("smoke2-a");
+let a = new Client("smoke2-a", entry.token);
 await a.connect(entry.port);
 const w = await a.hello();
 check("welcome.evalEngine", w.eval && (w.eval.engine === "csc" || w.eval.engine === "codedom"), JSON.stringify(w.eval));
@@ -221,7 +223,7 @@ if (entry) {
   let connected = false;
   let w2 = null;
   for (let i = 0; i < 12 && !connected; i++) {
-    a = new Client("smoke2-a2");
+    a = new Client("smoke2-a2", entry.token);
     try {
       await a.connect(entry.port);
       w2 = await Promise.race([

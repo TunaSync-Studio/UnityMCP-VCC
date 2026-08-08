@@ -1,0 +1,23 @@
+{
+    "name": "TunaSync.UnityMCP.Editor.Tests",
+    "rootNamespace": "TunaSync.UnityMCP.Editor.Tests",
+    "references": [
+        "TunaSync.UnityMCP.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false,
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

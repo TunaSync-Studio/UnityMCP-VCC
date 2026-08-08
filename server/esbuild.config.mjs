@@ -56,7 +56,15 @@ function copyRecipes() {
     return;
   }
 
-  fs.rmSync(dstRecipes, { recursive: true, force: true });
+  // SMB/NAS directory enumeration can briefly lag behind deletes and return
+  // ENOTEMPTY even though every visible child was removed. Node only retries
+  // recursive rm when maxRetries is explicit; keep the retry finite.
+  fs.rmSync(dstRecipes, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 250,
+  });
   fs.cpSync(srcRecipes, dstRecipes, {
     recursive: true,
     filter: (src) => {

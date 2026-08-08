@@ -17,6 +17,14 @@ namespace TunaSync.UnityMCP.Editor
 {
     internal sealed class TcpHost
     {
+        internal sealed class ClientInfo
+        {
+            public string Name;
+            public string Version;
+            public int? Pid;
+            public string SessionId;
+        }
+
         private const string PortKey = "TunaSync.UnityMCP.Port.v1";
         private const string TokenKey = "TunaSync.UnityMCP.Token.v1";
 
@@ -66,6 +74,31 @@ namespace TunaSync.UnityMCP.Editor
                         names.Add(string.IsNullOrEmpty(n) ? "?" : n);
                     }
                     return names.ToArray();
+                }
+            }
+        }
+
+        /// <summary>Handshaked client details for the editor status UI.</summary>
+        public ClientInfo[] Clients
+        {
+            get
+            {
+                lock (_sessionsGate)
+                {
+                    List<ClientInfo> clients = new List<ClientInfo>(_sessions.Count);
+                    for (int i = 0; i < _sessions.Count; i++)
+                    {
+                        ClientSession session = _sessions[i];
+                        if (!session.IsReady) continue;
+                        clients.Add(new ClientInfo
+                        {
+                            Name = session.ClientName,
+                            Version = session.ClientVersion,
+                            Pid = session.ClientPid,
+                            SessionId = session.SessionId,
+                        });
+                    }
+                    return clients.ToArray();
                 }
             }
         }
@@ -273,7 +306,11 @@ namespace TunaSync.UnityMCP.Editor
         /// </summary>
         public void StopWithBye(string reason, int? resumeHintMs, int flushBudgetMs)
         {
-            if (_stopped) return;
+            if (_stopped)
+            {
+                if (ReferenceEquals(Current, this)) Current = null;
+                return;
+            }
             _stopped = true; // accept loop drops any client that races in from here on
 
             ClientSession[] snapshot;
@@ -302,6 +339,7 @@ namespace TunaSync.UnityMCP.Editor
             {
                 leftovers[i].Close(reason);
             }
+            if (ReferenceEquals(Current, this)) Current = null;
         }
     }
 }

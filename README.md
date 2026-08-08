@@ -27,7 +27,13 @@ claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
 codex mcp add unity-mcp -- npx -y tunasync-unity-mcp
 ```
 
-**3 —** open the Unity project, approve the one-time consent dialog, check `Tools > TunaSync Unity MCP > Status Window`, then ask your assistant for `unity_health_check`.
+**3 —** open the Unity project, approve the one-time consent dialog, check `Tools > TunaSync Unity MCP > Creator Console`, then ask your assistant for `unity_health_check`.
+
+Local diagnostics (no MCP session required):
+
+```bash
+npx -y tunasync-unity-mcp doctor
+```
 
 Details (UPM path, manual MCP config, arming real uploads): `docs/INSTALL.md`.
 

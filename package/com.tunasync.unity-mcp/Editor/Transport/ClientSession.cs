@@ -38,6 +38,8 @@ namespace TunaSync.UnityMCP.Editor
         public string SessionId { get; private set; }
 
         public string ClientName { get; private set; }
+        public string ClientVersion { get; private set; }
+        public int? ClientPid { get; private set; }
 
         public ClientSession(TcpClient client, TcpHost host)
         {
@@ -45,6 +47,7 @@ namespace TunaSync.UnityMCP.Editor
             _host = host;
             SessionId = "pre-hello-" + InstanceId;
             ClientName = "unknown";
+            ClientVersion = "unknown";
         }
 
         public bool IsReady => _ready;
@@ -323,6 +326,17 @@ namespace TunaSync.UnityMCP.Editor
                 ? client["name"].Value<string>()
                 : null;
             ClientName = string.IsNullOrEmpty(name) ? "unknown" : name;
+            string version = client != null && client["version"] != null &&
+                             client["version"].Type != JTokenType.Null
+                ? client["version"].Value<string>()
+                : null;
+            ClientVersion = string.IsNullOrEmpty(version) ? "unknown" : version;
+            try
+            {
+                JToken pid = client != null ? client["pid"] : null;
+                ClientPid = pid != null && pid.Type != JTokenType.Null ? pid.Value<int?>() : null;
+            }
+            catch { ClientPid = null; }
 
             _helloDone = true;
             Send(Frames.Welcome(SysHandlers.BuildWelcomePayload(pick)));

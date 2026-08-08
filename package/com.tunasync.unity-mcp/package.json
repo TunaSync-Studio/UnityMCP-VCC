@@ -1,9 +1,9 @@
 {
     "name": "com.tunasync.unity-mcp",
     "displayName": "TunaSync Unity MCP",
-    "version": "2.4.3",
+    "version": "2.5.0",
     "unity": "2022.3",
-    "description": "Editor-side TCP transport that exposes the Unity Editor to MCP servers (UnityMCP v2). Hosts a loopback TcpListener with length-prefixed JSON frames, a discovery registry, compile/domain-reload aware dispatch, and a write lease.",
+    "description": "Local-first Unity Editor bridge for Codex, Claude, Cursor and other MCP hosts. Includes a Creator Console, loopback transport, jobs, diagnostics, write lease and human-gated VRChat uploads.",
     "author": {
         "name": "TunaSync"
     },
@@ -19,6 +19,7 @@
     "keywords": [
         "mcp",
         "claude",
+        "codex",
         "editor-automation",
         "tcp",
         "vrchat"

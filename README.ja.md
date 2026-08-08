@@ -28,7 +28,13 @@ claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
 codex mcp add unity-mcp -- npx -y tunasync-unity-mcp
 ```
 
-**3 —** プロジェクトを開いて初回の同意ダイアログを承認 (`Tools > TunaSync Unity MCP > Status Window`)、AI に `unity_health_check` を頼んで接続を確認。
+**3 —** プロジェクトを開いて初回の同意ダイアログを承認 (`Tools > TunaSync Unity MCP > Creator Console`)、AI に `unity_health_check` を頼んで接続を確認。
+
+MCPセッション不要のローカル診断:
+
+```bash
+npx -y tunasync-unity-mcp doctor
+```
 
 詳細 (UPM 経路・手動 MCP 設定・実アップロードの arm): `docs/INSTALL.ja.md`。
 

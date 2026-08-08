@@ -26,7 +26,7 @@ namespace TunaSync.UnityMCP.Editor
     /// </summary>
     public static class McpEditorInfo
     {
-        public const string PluginVersion = "2.4.3";
+        public const string PluginVersion = "2.5.0";
 
         private const string SessionIdKey = "TunaSync.UnityMCP.SessionId.v1";
         private const string ReloadCountKey = "TunaSync.UnityMCP.ReloadCount.v1";
@@ -84,7 +84,9 @@ namespace TunaSync.UnityMCP.Editor
         private const string ConsentOffLoggedKey = "TunaSync.UnityMCP.ConsentOffLogged.v1";
         private const string AutoConsentEnvVar = "UNITY_MCP_AUTOCONSENT";
 
+        private static bool _initialized;
         private static bool _started;
+        private static bool _jobsRestored;
 
         internal static bool IsStarted => _started;
 
@@ -220,45 +222,73 @@ namespace TunaSync.UnityMCP.Editor
         /// </summary>
         internal static void StartServices()
         {
-            if (_started) return;
+            if (_started && TcpHost.Current != null) return;
             if (McpEditorInfo.DisabledMarkerExists)
             {
                 Debug.LogWarning("[UnityMCP] UnityMCP.disabled marker present; not starting.");
                 return;
             }
-            _started = true;
             SessionState.EraseString(ConsentOffLoggedKey);
 
-            MainThreadPump.Init();
-            LogCapture.Init();
-            CompileGate.Init();   // subscribes beforeAssemblyReload FIRST: reload.imminent precedes bye
-            LeaseManager.Init();
-            EvalService.Init();   // probes Unity's Roslyn toolchain -> engine csc|none
-            JobManager.RegisterExecutor(new DemoSleepExecutor());
-            JobManager.RegisterExecutor(new EvalJobExecutor());
-            SysHandlers.RegisterAll();
-            EvalHandlers.RegisterAll();
-            StateHandlers.RegisterAll();
-            CaptureHandlers.RegisterAll();
+            if (!_initialized)
+            {
+                _initialized = true;
+                MainThreadPump.Init();
+                LogCapture.Init();
+                CompileGate.Init();   // subscribes beforeAssemblyReload FIRST: reload.imminent precedes bye
+                LeaseManager.Init();
+                EvalService.Init();   // probes Unity's Roslyn toolchain -> engine csc|none
+                JobManager.RegisterExecutor(new DemoSleepExecutor());
+                JobManager.RegisterExecutor(new EvalJobExecutor());
+                SysHandlers.RegisterAll();
+                EvalHandlers.RegisterAll();
+                StateHandlers.RegisterAll();
+                CaptureHandlers.RegisterAll();
 #if MCP_NDMF
-            NdmfHandlers.RegisterAll();      // ndmf.bake job executor
+                NdmfHandlers.RegisterAll();      // ndmf.bake job executor
 #endif
 #if MCP_VRCSDK3_AVATARS || MCP_VRCSDK3_WORLDS
-            VrcHandlers.RegisterAll();       // vrc.upload executor (+ vrc.avatarAudit)
+                VrcHandlers.RegisterAll();       // vrc.upload executor (+ vrc.avatarAudit)
 #endif
+
+                // Registered AFTER CompileGate.Init so the ritual runs second.
+                AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+                EditorApplication.quitting += OnQuitting;
+            }
 
             TcpHost host = TcpHost.Start();
             PortRegistry.Start(host.Port, host.Token);
-            JobManager.RestoreAfterReload(); // after host start: resume/fail persisted jobs
-
-            // Registered AFTER CompileGate.Init so the ritual runs second.
-            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
-            EditorApplication.quitting += OnQuitting;
+            if (!_jobsRestored)
+            {
+                JobManager.RestoreAfterReload(); // once per domain
+                _jobsRestored = true;
+            }
+            _started = true;
 
             Debug.Log("[UnityMCP] v" + McpEditorInfo.PluginVersion +
                       " listening on 127.0.0.1:" + host.Port +
                       " (project '" + McpEditorInfo.ProjectName +
                       "', reload #" + McpEditorInfo.DomainReloadCount + ")");
+        }
+
+        /// <summary>
+        /// Human kill switch. Main thread only. Stops discovery and transport
+        /// immediately; subsystem/editor hooks stay initialized so Enable can
+        /// restart safely without duplicate registrations.
+        /// </summary>
+        internal static int StopServices(string reason, bool cancelJobs)
+        {
+            int cancelled = cancelJobs ? JobManager.CancelAll() : 0;
+            Dispatcher.FailAllInFlight(ErrorCodes.Cancelled, false,
+                "Unity MCP stopped by the local operator");
+            string holder = LeaseManager.CurrentHolder();
+            if (!string.IsNullOrEmpty(holder)) LeaseManager.Release(holder);
+
+            TcpHost host = TcpHost.Current;
+            if (host != null) host.StopWithBye(reason ?? "disabled", null, 250);
+            PortRegistry.DeleteNow();
+            _started = false;
+            return cancelled;
         }
 
         // PROTOCOL.md "Domain reload ritual". Must stay fast (<300 ms worst case):
@@ -280,6 +310,7 @@ namespace TunaSync.UnityMCP.Editor
                 //       -> close sockets -> stop listener. Registry stays on disk.
                 TcpHost host = TcpHost.Current;
                 if (host != null) host.StopWithBye("domain_reload", 3000, 250);
+                _started = false;
             }
             catch (Exception ex)
             {
@@ -294,6 +325,7 @@ namespace TunaSync.UnityMCP.Editor
                 TcpHost host = TcpHost.Current;
                 if (host != null) host.StopWithBye("quit", null, 250);
                 PortRegistry.DeleteNow();
+                _started = false;
             }
             catch (Exception ex)
             {

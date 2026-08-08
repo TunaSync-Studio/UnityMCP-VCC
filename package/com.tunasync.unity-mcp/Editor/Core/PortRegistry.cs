@@ -20,7 +20,8 @@ namespace TunaSync.UnityMCP.Editor
         private static string _filePath;
         private static string _cachedJson;
         private static long _lastTouchUtcTicks;
-        private static bool _started;
+        private static bool _tickerAdded;
+        private static bool _active;
 
         public static string RegistryDir => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -34,9 +35,6 @@ namespace TunaSync.UnityMCP.Editor
         /// </summary>
         public static void Start(int port, string token)
         {
-            if (_started) return;
-            _started = true;
-
             RegistryEntry entry = new RegistryEntry
             {
                 Port = port,
@@ -51,20 +49,32 @@ namespace TunaSync.UnityMCP.Editor
             _cachedJson = Protocol.Serialize(entry);
             _filePath = Path.Combine(RegistryDir, Protocol.RegistryFileName(McpEditorInfo.ProjectPath));
             _lastTouchUtcTicks = DateTime.UtcNow.Ticks;
+            _active = true;
 
-            Thread t = new Thread(WriteAndSweep)
+            // The entry is small and must exist before a freshly-started
+            // listener is advertised as ready.  Write it synchronously, then
+            // sweep unrelated dead entries in the background.
+            try { WriteAtomic(); }
+            catch (Exception ex) { Debug.LogError("[UnityMCP] registry startup failed: " + ex); }
+
+            Thread t = new Thread(SweepDeadSiblings)
             {
                 IsBackground = true,
-                Name = "UnityMCP-Registry",
+                Name = "UnityMCP-RegistrySweep",
             };
             t.Start();
 
-            MainThreadPump.AddTicker(Tick);
+            if (!_tickerAdded)
+            {
+                _tickerAdded = true;
+                MainThreadPump.AddTicker(Tick);
+            }
         }
 
         /// <summary>Editor quit: remove our entry. Main thread; fast.</summary>
         public static void DeleteNow()
         {
+            _active = false;
             if (_filePath == null) return;
             try
             {
@@ -79,7 +89,7 @@ namespace TunaSync.UnityMCP.Editor
         // Pump tick (main thread): touch mtime every 60 s; re-create if swept.
         private static void Tick()
         {
-            if (_filePath == null || _cachedJson == null) return;
+            if (!_active || _filePath == null || _cachedJson == null) return;
             long now = DateTime.UtcNow.Ticks;
             if (now - _lastTouchUtcTicks < TouchIntervalTicks) return;
             _lastTouchUtcTicks = now;
@@ -91,20 +101,6 @@ namespace TunaSync.UnityMCP.Editor
             catch (Exception ex)
             {
                 Debug.LogWarning("[UnityMCP] registry touch failed: " + ex.Message);
-            }
-        }
-
-        // Background thread (file IO only, no Unity API).
-        private static void WriteAndSweep()
-        {
-            try
-            {
-                WriteAtomic();
-                SweepDeadSiblings();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("[UnityMCP] registry startup failed: " + ex);
             }
         }
 

@@ -6,6 +6,31 @@ package version.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-09
+
+Unity plugin and npm server release focused on operator UX and local
+diagnostics. The wire protocol remains v1.
+
+### Added
+- **Creator Console** (EN/JA): truthful transport state, connected MCP server
+  version/PID/session, write-lease owner, latest jobs with progress/cancel,
+  compile/reload state and sanitized compiler diagnostics.
+- Client-aware setup tabs for Codex, Claude Code, Cursor and generic JSON.
+- Human-only VRC upload arm/disarm controls. No MCP method can create the
+  one-shot arm file; the UI requires a deliberate local confirmation.
+- Read-only `npx -y tunasync-unity-mcp doctor` (`--json`, `--verbose`) for
+  Node, recipe bundle, registry/HTTP health, VCC projects and vrc-get checks.
+- Searchable bilingual GitHub Pages UI for all 412 public recipes, with
+  responsive and keyboard-accessible layouts.
+- Unity EditMode coverage for generated client setup and the fixed arm TTL.
+
+### Changed
+- `UnityMCP.disabled` is now an immediate kill switch: it disconnects clients,
+  stops the listener and registry, releases the write lease and signals active
+  jobs. Removing it restarts the transport without a domain reload or duplicate
+  Editor hooks.
+- The banner and setup surfaces now name Codex explicitly.
+
 ## [2.4.5] - 2026-08-09
 
 Server-only release (npm). The Unity plugin stays at 2.4.3 because the wire

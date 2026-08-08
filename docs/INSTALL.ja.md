@@ -42,7 +42,7 @@ https://github.com/TunaSync-Studio/UnityMCP-VCC.git?path=/package/com.tunasync.u
 → **Enable** をクリック。そのプロジェクトではこれが唯一のクリックです
 (同意はユーザー × プロジェクト単位)。以後はエディタと一緒に静かに起動します。
 
-- 後から変更: `Tools > TunaSync Unity MCP > Status Window` (有効/無効ボタン・
+- 後から変更: `Tools > TunaSync Unity MCP > Creator Console` (即時有効/停止ボタン・
   日本語表示切替もここ) またはプロジェクト直下に `UnityMCP.disabled` を置く。
 - CI / ヘッドレス: 環境変数 `UNITY_MCP_AUTOCONSENT=1`。
 
@@ -80,13 +80,22 @@ ChatGPT デスクトップアプリ・Codex CLI・Codex IDE 拡張は同じ MCP 
 **Cursor / その他の MCP クライアント**: 同じコマンド
 (`npx -y tunasync-unity-mcp`、stdio トランスポート)。
 
-Status Window の **「MCP設定をコピー」** ボタンでこの JSON を
+Creator Console のクライアント別設定ボタンで Codex / Claude / Cursor 用の設定を
 クリップボードに取れます。
+
+MCPセッションを起動せずに、読み取り専用のローカル事前診断もできます:
+
+```bash
+npx -y tunasync-unity-mcp doctor
+```
+
+自動化用JSONは`--json`、ローカルのプロジェクト名/pathまで確認する場合だけ
+`--verbose`を付けます。既定出力はそれらを省き、registry tokenは常に出しません。
 
 ## 3. 使う
 
 1. Unity プロジェクトを開く (ブリッジは自動起動 — 気になるなら
-   `Tools > TunaSync Unity MCP > Status Window`)。
+   `Tools > TunaSync Unity MCP > Creator Console`)。
 2. AI に話しかけるだけ。`unity_health_check` で接続確認。以降:
    `execute_editor_command` (エディタ内で C# 実行)、`get_editor_state`、
    `scene_query`、`camera_capture`、`find_recipe` (400+ の既製エディタ操作)、
@@ -126,7 +135,9 @@ MCP クライアントはツール一覧を**クライアントセッション�
 ## 実 VRChat アップロードの arm (リポジトリのチェックアウト不要)
 
 実 `vrc_upload` には `confirm:true` **に加えて**、人間 (あなた) が作る
-一回限りの arm ファイルが必要です。リポジトリがあるなら
+一回限りの arm ファイルが必要です。推奨は **Creator Console > VRCアップロード
+安全ゲート > アップロード1回を許可** です。ローカル確認が必須で、MCPからarmする
+methodはありません。リポジトリがあるなら代わりに
 `tools/arm-vrc-upload.bat` を実行。VCC + npx で導入していてチェックアウトが
 無い場合は、マーカーファイルを自分で作ってください:
 

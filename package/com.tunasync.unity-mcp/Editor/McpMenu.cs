@@ -40,21 +40,31 @@ namespace TunaSync.UnityMCP.Editor
         internal static void ToggleDisabledMarker()
         {
             string path = MarkerPath();
-            if (File.Exists(path))
+            SetDisabled(!File.Exists(path));
+        }
+
+        internal static int SetDisabled(bool disabled)
+        {
+            string path = MarkerPath();
+            if (!disabled)
             {
-                File.Delete(path);
-                Debug.Log("[UnityMCP] removed " + path +
-                          "; MCP will start on the next domain reload.");
+                if (File.Exists(path)) File.Delete(path);
+                ConsentStore.Write(true);
+                Bootstrap.StartServices();
+                Debug.Log("[UnityMCP] enabled immediately; removed " + path + ".");
+                return 0;
             }
-            else
+
+            if (!File.Exists(path))
             {
                 File.WriteAllText(path,
                     "Presence of this file disables TunaSync Unity MCP" +
                     " (no listener, no registry). Delete it to re-enable.\n");
-                Debug.Log("[UnityMCP] created " + path +
-                          "; MCP will not start after the next domain reload" +
-                          " (currently running: " + (TcpHost.Current != null) + ").");
             }
+            int cancelled = Bootstrap.StopServices("disabled_by_operator", true);
+            Debug.Log("[UnityMCP] disabled immediately; listener and registry stopped" +
+                      (cancelled > 0 ? ", jobs signalled=" + cancelled : "") + ".");
+            return cancelled;
         }
 
         internal static string MarkerPath()

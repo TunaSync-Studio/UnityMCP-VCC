@@ -2,6 +2,7 @@
 // Drives the production path with a minimal MCP JSON-RPC client over stdio.
 // Usage: node smoke-p3-mcp.mjs [projectPathSubstring]
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -84,6 +85,23 @@ const ev = await callTool("execute_editor_command", {
 });
 check("tool.execute", !ev.isError && ev.content.includes("42"), ev.content.slice(0, 140));
 
+// Real object lifecycle in the isolated smoke project: create -> mutate ->
+// query through the public MCP surface -> cleanup. A unique fixed name makes
+// interrupted runs self-healing on the next run.
+const objectName = "UnityMCP_v250_E2E_Object";
+const created = await callTool("execute_editor_command", {
+  code: `var old=UnityEngine.GameObject.Find("${objectName}"); if(old!=null) UnityEngine.Object.DestroyImmediate(old); var go=new UnityEngine.GameObject("${objectName}"); go.transform.position=new UnityEngine.Vector3(1,2,3); return new { created=go.name, position=go.transform.position.ToString() };`,
+});
+check("object.create", !created.isError && created.content.includes(objectName), created.content.slice(0, 120));
+
+const modified = await callTool("execute_editor_command", {
+  code: `var go=UnityEngine.GameObject.Find("${objectName}"); if(go==null) throw new System.Exception("test object missing"); go.transform.position=new UnityEngine.Vector3(4,5,6); go.AddComponent<UnityEngine.BoxCollider>(); return new { modified=go.name, x=go.transform.position.x, collider=go.GetComponent<UnityEngine.BoxCollider>()!=null };`,
+});
+check("object.modify", !modified.isError && modified.content.includes('"x": 4') && modified.content.includes('"collider": true'), modified.content.slice(0, 160));
+
+const objectQuery = await callTool("scene_query", { query: objectName, limit: 10 });
+check("object.query", !objectQuery.isError && objectQuery.content.includes(objectName), objectQuery.content.slice(0, 140));
+
 // state sections + size guard
 const st = await callTool("get_editor_state", { sections: ["summary", "packages"], max_bytes: 20000 });
 check("tool.state", !st.isError && st.content.includes("summary") === false ? st.content.length > 0 : !st.isError, st.content.slice(0, 120));
@@ -111,6 +129,21 @@ check("tool.job-status", !jsb.isError, jsb.content.slice(0, 80));
 // camera capture: batchmode -nographics expected to fail CLEANLY (structured error, not hang)
 const cam = await callTool("camera_capture", { view: "scene" }, 60000);
 check("tool.camera-clean-fail-or-png", cam.content.includes(".png") || cam.isError, (cam.isError ? "clean error: " : "png: ") + cam.content.slice(0, 100));
+if (!cam.isError) {
+  try {
+    const capture = JSON.parse(cam.content);
+    const captureRoot = path.resolve(process.env.LOCALAPPDATA ?? "", "UnityMCP", "captures");
+    const capturePath = path.resolve(String(capture.path ?? ""));
+    if (capturePath.startsWith(captureRoot + path.sep) && fs.existsSync(capturePath)) {
+      fs.unlinkSync(capturePath); // this smoke's own unique output
+    }
+  } catch { /* a non-JSON success stays as evidence rather than guessing a path */ }
+}
+
+const cleanup = await callTool("execute_editor_command", {
+  code: `var go=UnityEngine.GameObject.Find("${objectName}"); if(go!=null) UnityEngine.Object.DestroyImmediate(go); return new { cleaned=UnityEngine.GameObject.Find("${objectName}")==null };`,
+});
+check("object.cleanup", !cleanup.isError && cleanup.content.includes('"cleaned": true'), cleanup.content.slice(0, 100));
 
 child.kill();
 const failed = results.filter((r) => !r.ok).length;

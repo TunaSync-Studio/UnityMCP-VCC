@@ -199,6 +199,21 @@ namespace TunaSync.UnityMCP.Editor
             return true;
         }
 
+        /// <summary>
+        /// MAIN thread. Signals every non-terminal job and immediately closes
+        /// pending jobs. Used by the human kill switch before transport stop.
+        /// </summary>
+        public static int CancelAll()
+        {
+            int signalled = 0;
+            foreach (JobEntry entry in _jobs.Values)
+            {
+                if (JobState.IsTerminal(entry.Record.State)) continue;
+                if (Cancel(entry.Record.JobId)) signalled++;
+            }
+            return signalled;
+        }
+
         public static JobRecord GetRecord(string jobId)
         {
             JobEntry entry;

@@ -116,7 +116,7 @@ function check(name, ok, detail) {
 
 const entry = findEntry();
 if (!entry) { console.log("NO-REGISTRY-ENTRY for " + SUBSTR); process.exit(2); }
-console.log("registry:", JSON.stringify(entry));
+console.log("registry:", JSON.stringify({ ...entry, token: entry.token ? "<redacted>" : undefined }));
 
 const a = new Client("smoke-a", entry.token);
 await a.connect(entry.port);

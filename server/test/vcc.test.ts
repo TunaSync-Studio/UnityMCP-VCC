@@ -49,6 +49,17 @@ function makeProject(root: string, name: string, unity = "2022.3.22f1"): string 
 }
 
 describe("vcc file reads", () => {
+  it("treats a temporarily malformed settings file as an empty read", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-vcc-broken-"));
+    try {
+      const settings = path.join(tmp, "settings.json");
+      fs.writeFileSync(settings, '{"userProjects": [');
+      expect(listProjects(settings)).toEqual({ settingsPath: settings, projects: [] });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("listProjects reads userProjects and flags missing dirs", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-vcc-"));
     try {
