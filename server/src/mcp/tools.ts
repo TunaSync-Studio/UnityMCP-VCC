@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "../config.js";
-import { UnityMcpError, makeError, toUnityMcpError } from "../errors.js";
+import { UnityMcpError, hintFor, makeError, toUnityMcpError } from "../errors.js";
 import type { ErrorObj } from "../protocol.js";
 import type { RecipeLibrary } from "../recipes.js";
 import type { UnityClient } from "../unity/client.js";
@@ -64,9 +64,10 @@ function fail(err: unknown): CallToolResult {
   // F-13 completion: the moment you most need to know WHICH server answered
   // is when it answers with an error (BUSY_MODAL during a stale-build hunt),
   // so every error carries the server identity, not just health responses.
+  const hint = hintFor(obj);
   return {
     content: [
-      { type: "text", text: `[${obj.code}] ${obj.message}` },
+      { type: "text", text: `[${obj.code}] ${obj.message}` + (hint ? `\n${hint}` : "") },
       { type: "text", text: JSON.stringify({ error: obj, server: serverIdentity() }, null, 2) },
     ],
     isError: true,

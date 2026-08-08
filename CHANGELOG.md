@@ -3,6 +3,28 @@
 Format: [Keep a Changelog](https://keepachangelog.com/). Versions tag the
 repo as `v2.x.y`; server and package move in lockstep.
 
+## [2.4.4] - 2026-08-08
+
+Server-only release (npm). The Unity plugin stays at 2.4.3 — nothing
+plugin-side changed, and `npx -y tunasync-unity-mcp` picks this up
+automatically. Findings come from a clean-room post-publish audit
+(fresh VCC project, published artifacts only).
+
+### Fixed
+- **`vrc_physbone_audit` recipe**: an unset `rootTransform` (the normal
+  state — "use my own transform") crashed the recipe with
+  `UnassignedReferenceException`. Cause: Unity fake-null — `as Transform`
+  on a destroyed/unassigned serialized field returns a non-null wrapper,
+  so `?? pb.transform` never fired. The recipe now falls back through
+  Unity's overloaded `== null`. (The built-in `vrc_avatar_audit` tool was
+  never affected.)
+- **`LEASE_HELD` now says what to do**: the server appends a hint that a
+  live holder keeps renewing the lease (waiting will not free it) and
+  points at `session_lease {action:"takeover"}`.
+- **`METHOD_NOT_FOUND` for `ndmf.bake` now says why**: the server appends
+  a hint that NDMF is missing from that project and installing
+  nadena.dev.ndmf (ships with Modular Avatar) registers the executor.
+
 ## [2.4.3] - 2026-08-08
 
 ### Fixed

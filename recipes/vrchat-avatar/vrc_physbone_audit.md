@@ -47,7 +47,11 @@ try
     foreach (var pb in pbs)
     {
         var rootField = pb.GetType().GetField("rootTransform");
-        var root = (rootField?.GetValue(pb) as Transform) ?? pb.transform;
+        // rootTransform unset is the NORMAL state (means "use my own transform").
+        // An unset serialized field is a Unity fake-null: `as Transform` yields a
+        // non-null wrapper, so `??` never falls back - use Unity's overloaded ==.
+        var rootVal = rootField != null ? rootField.GetValue(pb) as Transform : null;
+        var root = (rootVal == null) ? pb.transform : rootVal;
         var children = root.GetComponentsInChildren<Transform>(true).Where(t => t != root).ToList();
         int affected = children.Count;
         totalAffected += affected;
