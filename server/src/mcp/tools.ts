@@ -6,7 +6,7 @@
 
 import { z } from "zod";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "../config.js";
 import { UnityMcpError, hintFor, makeError, toUnityMcpError } from "../errors.js";
 import type { ErrorObj } from "../protocol.js";
@@ -345,6 +345,60 @@ function maskProgressExtra(extra: ToolExtra, stream: StreamModeState): ToolExtra
 
 type ToolRegistrar = (server: McpServer, ctx: ToolContext) => void;
 
+// MCP hosts use these hints to distinguish retrieval from writes and public
+// side effects. Mixed-action tools are classified by their most consequential
+// mode: annotations cannot vary with arguments, so safety wins over convenience.
+const READ_ONLY_TOOL = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const satisfies ToolAnnotations;
+
+const LOCAL_WRITE_TOOL = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const satisfies ToolAnnotations;
+
+const DESTRUCTIVE_LOCAL_TOOL = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: false,
+} as const satisfies ToolAnnotations;
+
+const DESTRUCTIVE_OPEN_WORLD_TOOL = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: true,
+} as const satisfies ToolAnnotations;
+
+const TOOL_ANNOTATIONS = {
+  // Arbitrary C# can mutate/delete local data or reach external systems.
+  execute_editor_command: DESTRUCTIVE_OPEN_WORLD_TOOL,
+  // wake=true restores/focuses the editor, so this is not strictly read-only.
+  unity_health_check: LOCAL_WRITE_TOOL,
+  get_editor_state: READ_ONLY_TOOL,
+  scene_query: READ_ONLY_TOOL,
+  // output_path can overwrite an existing PNG.
+  camera_capture: DESTRUCTIVE_LOCAL_TOOL,
+  // Creates a unique baked prefab and leaves the source avatar untouched.
+  ndmf_bake_run: LOCAL_WRITE_TOOL,
+  // The same tool contains dry-run and real public-publish modes.
+  vrc_upload: DESTRUCTIVE_OPEN_WORLD_TOOL,
+  vrc_avatar_audit: READ_ONLY_TOOL,
+  find_recipe: READ_ONLY_TOOL,
+  // clear=true irreversibly clears buffered/editor logs.
+  get_logs: DESTRUCTIVE_LOCAL_TOOL,
+  session_lease: LOCAL_WRITE_TOOL,
+  job_status: READ_ONLY_TOOL,
+  job_cancel: DESTRUCTIVE_LOCAL_TOOL,
+  vcc_project: READ_ONLY_TOOL,
+  // remove can delete packages; create/add/resolve also mutate project files.
+  vpm_manage: DESTRUCTIVE_LOCAL_TOOL,
+} as const satisfies Record<string, ToolAnnotations>;
+
+type ToolName = keyof typeof TOOL_ANNOTATIONS;
+
 /**
  * Parsed-args type for a raw zod shape; mirrors the SDK's ShapeOutput for
  * zod v3 schemas (optional fields become `T | undefined`, key stays present).
@@ -353,7 +407,7 @@ type ArgsOf<S extends z.ZodRawShape> = { [K in keyof S]: z.infer<S[K]> };
 
 /** Declare one tool; wraps the handler so errors never escape raw. */
 function tool<S extends z.ZodRawShape>(
-  name: string,
+  name: ToolName,
   description: string,
   schema: S,
   handler: (args: ArgsOf<S>, ctx: ToolContext, extra: ToolExtra) => Promise<CallToolResult>,
@@ -376,7 +430,7 @@ function tool<S extends z.ZodRawShape>(
     // args mapping, same extra, same CallToolResult).
     server.registerTool(
       name,
-      { description, inputSchema: schema },
+      { description, inputSchema: schema, annotations: TOOL_ANNOTATIONS[name] },
       cb as unknown as ToolCallback<S>,
     );
   };

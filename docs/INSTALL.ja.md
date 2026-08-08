@@ -56,6 +56,20 @@ Node.js 20+ が必要です。
 claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
 ```
 
+**OpenAI Codex CLI**
+
+```bash
+codex mcp add unity-mcp -- npx -y tunasync-unity-mcp
+```
+
+ChatGPT デスクトップアプリ・Codex CLI・Codex IDE 拡張は同じ MCP 設定を
+共有します。デスクトップ / IDE では **Settings > MCP servers > Add server**
+から **STDIO** を選び、command=`npx`、arguments=`-y`,
+`tunasync-unity-mcp` として保存後に再起動してください。NDMF / アップロードの
+長い待機を行う場合は、`~/.codex/config.toml` に生成された
+`[mcp_servers.unity-mcp]` テーブルへ `tool_timeout_sec = 1300` を追加できます。
+待機がタイムアウトしてもジョブは継続し、`job_status` で確認できます。
+
 **Claude Desktop** — `claude_desktop_config.json`:
 
 ```json

@@ -21,7 +21,11 @@ https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json
 **2 — AI 側 (MCP クライアント・Node 20+):**
 
 ```bash
+# Claude Code
 claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
+
+# OpenAI Codex CLI
+codex mcp add unity-mcp -- npx -y tunasync-unity-mcp
 ```
 
 **3 —** プロジェクトを開いて初回の同意ダイアログを承認 (`Tools > TunaSync Unity MCP > Status Window`)、AI に `unity_health_check` を頼んで接続を確認。
@@ -31,7 +35,7 @@ claude mcp add unity-mcp -- npx -y tunasync-unity-mcp
 ## アーキテクチャ
 
 ```
-MCP クライアント (Claude, Cursor など任意の MCP ホスト - N セッション)
+MCP クライアント (Claude, Codex, Cursor など任意の MCP ホスト - N セッション)
    │  stdio
    ▼
 server/  tunasync-unity-mcp (Node 20+, MCP SDK 1.x, esbuild 単一バンドル)

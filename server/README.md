@@ -47,6 +47,22 @@ Or with a pinned project:
 claude mcp add unity --env UNITY_MCP_PROJECT="MyProject" -- npx -y tunasync-unity-mcp
 ```
 
+### OpenAI Codex
+
+```
+codex mcp add unity -- npx -y tunasync-unity-mcp
+```
+
+Or with a pinned project:
+
+```
+codex mcp add unity --env UNITY_MCP_PROJECT="MyProject" -- npx -y tunasync-unity-mcp
+```
+
+The desktop app, CLI and IDE extension share this MCP configuration. For
+long NDMF/upload waits, set `tool_timeout_sec = 1300` in the server's
+`[mcp_servers.unity]` table in `~/.codex/config.toml`.
+
 ### Claude Desktop
 
 ```json

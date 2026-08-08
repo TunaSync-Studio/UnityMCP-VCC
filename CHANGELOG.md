@@ -1,7 +1,26 @@
 # Changelog
 
 Format: [Keep a Changelog](https://keepachangelog.com/). Versions tag the
-repo as `v2.x.y`; server and package move in lockstep.
+repo as `v2.x.y`; server-only releases explicitly note the unchanged Unity
+package version.
+
+## [Unreleased]
+
+## [2.4.5] - 2026-08-09
+
+Server-only release (npm). The Unity plugin stays at 2.4.3 because the wire
+protocol is unchanged; Codex clients using `npx -y tunasync-unity-mcp` pick up
+the new server automatically.
+
+### Added
+- MCP server-wide operating/safety instructions, including project selection,
+  write-lease discipline, prompt-injection resistance and the human-only arm
+  rule for real VRChat uploads.
+- Explicit `readOnlyHint`, `destructiveHint` and `openWorldHint` metadata for
+  all 15 tools, with mixed-action tools classified by their strongest side
+  effect, plus an stdio distribution-bundle smoke test for the metadata.
+- OpenAI Codex CLI, desktop and IDE setup instructions, including the optional
+  long-job timeout setting.
 
 ## [2.4.4] - 2026-08-08
 
