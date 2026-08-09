@@ -6,6 +6,21 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-08-10
+
+Server-only npm republish. The `tunasync-unity-mcp@2.6.1` npm artifact
+was published from a tree whose `build/` and `recipes/` outputs had not
+been regenerated, so the tarball shipped 4 files instead of ~418 and the
+`tunasync-unity-mcp` bin did not exist after install. 2.6.1 on npm is
+deprecated; **the Unity package / VPM 2.6.1 zip is unaffected and stays
+current** (no plugin changes in this release).
+
+### Fixed
+- npm tarball actually contains `build/index.js` and the recipe set.
+- `prepack` now rebuilds the bundle and runs the metadata smoke, so a
+  publish from an unbuilt tree fails loudly instead of shipping an
+  empty package.
+
 ## [2.6.1] - 2026-08-09
 
 Unity plugin + npm server release: the four findings from the 2026-08-09
