@@ -69,7 +69,7 @@ namespace TunaSync.UnityMCP.Editor
                 {
                     switch (check)
                     {
-                        case "performance": byCheck[check] = CheckPerformance(avatar); break;
+                        case "performance": byCheck[check] = CheckPerformance(avatar, descriptor); break;
                         case "physbones": byCheck[check] = CheckPhysBones(avatar); break;
                         case "expressions": byCheck[check] = CheckExpressions(descriptor); break;
                         case "eyelook": byCheck[check] = CheckEyeLook(descriptor); break;
@@ -88,7 +88,7 @@ namespace TunaSync.UnityMCP.Editor
             return Task.FromResult<object>(result);
         }
 
-        private static JToken CheckPerformance(GameObject avatar)
+        private static JToken CheckPerformance(GameObject avatar, Component descriptor)
         {
             JObject o = new JObject();
             object stats = CalculatePerformanceStats(avatar, false);
@@ -105,7 +105,111 @@ namespace TunaSync.UnityMCP.Editor
             }
             o["stats"] = statsObj;
             o["overall"] = OverallRating(stats);
+            AddAnimTextureSupplement(avatar, descriptor, o);
             return o;
+        }
+
+        /// <summary>
+        /// P2-2: stats.textureMegabytes counts renderer-reachable textures
+        /// only - textures reached exclusively through animation
+        /// object-reference curves (the Modular Avatar material-swap case)
+        /// are invisible to it (~8% of the real total on a measured avatar).
+        /// Sum those separately as a runtime-memory estimate so the audit
+        /// stops under-reporting near the limits.
+        /// </summary>
+        private static void AddAnimTextureSupplement(GameObject avatar, Component descriptor, JObject o)
+        {
+            try
+            {
+                HashSet<Texture> rendererTex = new HashSet<Texture>();
+                Renderer[] renderers = avatar.GetComponentsInChildren<Renderer>(true);
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    Material[] mats = renderers[i].sharedMaterials;
+                    if (mats == null) continue;
+                    for (int m = 0; m < mats.Length; m++) AddMaterialTextures(mats[m], rendererTex);
+                }
+
+                HashSet<RuntimeAnimatorController> controllers = new HashSet<RuntimeAnimatorController>();
+#if MCP_VRCSDK3_AVATARS
+                VrcMenuHandlers.CollectDescriptorControllers(descriptor, controllers);
+#endif
+                Animator[] animators = avatar.GetComponentsInChildren<Animator>(true);
+                for (int i = 0; i < animators.Length; i++)
+                {
+                    if (animators[i].runtimeAnimatorController != null)
+                    {
+                        controllers.Add(animators[i].runtimeAnimatorController);
+                    }
+                }
+
+                HashSet<Texture> animTex = new HashSet<Texture>();
+                foreach (RuntimeAnimatorController rc in controllers)
+                {
+                    AnimationClip[] clips = rc.animationClips;
+                    if (clips == null) continue;
+                    for (int c = 0; c < clips.Length; c++)
+                    {
+                        AnimationClip clip = clips[c];
+                        if (clip == null) continue;
+                        EditorCurveBinding[] bindings = AnimationUtility.GetObjectReferenceCurveBindings(clip);
+                        for (int b = 0; b < bindings.Length; b++)
+                        {
+                            ObjectReferenceKeyframe[] keys = AnimationUtility.GetObjectReferenceCurve(clip, bindings[b]);
+                            if (keys == null) continue;
+                            for (int k = 0; k < keys.Length; k++)
+                            {
+                                UnityEngine.Object v = keys[k].value;
+                                Texture t = v as Texture;
+                                if (t != null)
+                                {
+                                    animTex.Add(t);
+                                    continue;
+                                }
+                                AddMaterialTextures(v as Material, animTex);
+                            }
+                        }
+                    }
+                }
+
+                double extraMb = 0;
+                int extraCount = 0;
+                foreach (Texture t in animTex)
+                {
+                    if (t == null || rendererTex.Contains(t)) continue;
+                    extraCount++;
+                    extraMb += UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(t) / (1024.0 * 1024.0);
+                }
+                o["textureMegabytesAnimOnly"] = Math.Round(extraMb, 2);
+                o["textureMegabytesAnimOnlyCount"] = extraCount;
+                o["textureMegabytesNote"] =
+                    "stats.textureMegabytes counts renderer-reachable textures only (treat as a " +
+                    "lower bound); textureMegabytesAnimOnly adds textures reached exclusively " +
+                    "through animation object-reference curves (e.g. Modular Avatar material " +
+                    "swaps), runtime-size estimate";
+            }
+            catch (Exception ex)
+            {
+                o["textureMegabytesNote"] = "anim-texture supplement failed: " + ex.Message;
+            }
+        }
+
+        private static void AddMaterialTextures(Material mat, HashSet<Texture> into)
+        {
+            if (mat == null) return;
+            string[] names;
+            try { names = mat.GetTexturePropertyNames(); }
+            catch { return; }
+            if (names == null) return;
+            for (int i = 0; i < names.Length; i++)
+            {
+                try
+                {
+                    Texture t = mat.GetTexture(names[i]);
+                    if (t != null) into.Add(t);
+                }
+                catch { }
+            }
         }
 
         private static string OverallRating(object stats)

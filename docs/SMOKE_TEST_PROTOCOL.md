@@ -31,7 +31,7 @@ identical content would make Refresh a no-op.)
 
 ## 3. Full-chain MCP gate — `node tools/smoke-p3-mcp.mjs <projectSubstring>`
 
-Real stdio server → TCP → plugin: initialize, 15 tools listed, health,
+Real stdio server → TCP → plugin: initialize, 18 tools listed, health,
 eval, sectioned state, scene_query, get_logs, find_recipe
 (exact / keyword / redirect), job_status, camera_capture (PNG even under
 -nographics via temp-camera fallback). 12 checks.

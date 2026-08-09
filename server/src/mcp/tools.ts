@@ -19,12 +19,20 @@ import { serverIdentity } from "../version.js";
 import {
   VRC_GET_INSTALL_HINT,
   VrcGetTimeoutError,
+  cleanDerivedLibrary,
+  closeProcessGracefully,
   createProject,
   defaultRunner,
+  editorOpenOn,
   findVrcGet,
+  killProcess,
+  launchUnity,
   listProjects,
+  pidAlive,
   projectInfo,
+  readEditorRegistry,
   registerInVcc,
+  resolveUnityExe,
   vpmActionSpec,
   type VrcGetRunner,
 } from "../vcc.js";
@@ -395,6 +403,12 @@ const TOOL_ANNOTATIONS = {
   vcc_project: READ_ONLY_TOOL,
   // remove can delete packages; create/add/resolve also mutate project files.
   vpm_manage: DESTRUCTIVE_LOCAL_TOOL,
+  // launch spawns a process, quit terminates one (forced kill can corrupt
+  // Library) - status alone would be read-only, strongest side wins.
+  unity_editor: DESTRUCTIVE_LOCAL_TOOL,
+  // imports can overwrite existing assets at the same paths.
+  asset_import: DESTRUCTIVE_LOCAL_TOOL,
+  vrc_menu: READ_ONLY_TOOL,
 } as const satisfies Record<string, ToolAnnotations>;
 
 type ToolName = keyof typeof TOOL_ANNOTATIONS;
@@ -462,6 +476,14 @@ const toolTable: readonly ToolRegistrar[] = [
         .boolean()
         .optional()
         .describe("Run as a resumable background job; survives longer operations"),
+      allow_play_mode: z
+        .boolean()
+        .optional()
+        .describe(
+          "Permit execution while the editor is in play mode (default false = " +
+            "blocked with PLAY_MODE_ACTIVE, because play-mode scene edits revert " +
+            "on exit while asset changes persist)",
+        ),
       project: projectArg,
     },
     async (args, ctx, extra) => {
@@ -473,6 +495,7 @@ const toolTable: readonly ToolRegistrar[] = [
           code: args.code,
           captureLogs: args.capture_logs ?? true,
           ...(args.run_as_job === true ? { runAsJob: true } : {}),
+          ...(args.allow_play_mode === true ? { allowPlayMode: true } : {}),
         };
         const result = await client.call("eval.run", evalParams, {
           timeoutMs: args.run_as_job === true ? JOB_SUBMIT_TIMEOUT_MS : timeoutMs,
@@ -1149,19 +1172,24 @@ const toolTable: readonly ToolRegistrar[] = [
     "Manage a VRChat project's packages - and create new projects - via the " +
       "vrc-get CLI (no Unity Editor needed). Actions: repos (list " +
       "repositories), search (find a package), outdated (JSON, per project), " +
-      "add / remove / resolve (modify the project - close or reload the " +
-      "Unity project afterwards), update_repos (refresh repo cache), create " +
-      "(copy a VCC template - avatar/world/base - to a NEW directory, " +
+      "add / remove / resolve / upgrade (modify the project - close or reload " +
+      "the Unity project afterwards; upgrade with no package updates " +
+      "everything, and its output can contain conflict warnings that -y " +
+      "auto-accepted - always read it), update_repos (refresh repo cache), " +
+      "create (copy a VCC template - avatar/world/base - to a NEW directory, " +
       "resolve its packages, add any 'packages' extras and register it in " +
-      "VCC; never overwrites). Requires vrc-get on PATH; without it this " +
-      "tool fails with install instructions while vcc_project keeps working. " +
-      "Package changes are git-recoverable but always tell the user what " +
-      "you are about to install, remove or create.",
+      "VCC; never overwrites). After a package write the derived caches " +
+      "Library/Bee and Library/ScriptAssemblies are deleted (clean_library, " +
+      "default true; skipped while that project's editor is open) - stale " +
+      "ones put the next start into Safe Mode. Requires vrc-get on PATH; " +
+      "without it this tool fails with install instructions while " +
+      "vcc_project keeps working. Package changes are git-recoverable but " +
+      "always tell the user what you are about to install, remove or create.",
     {
       action: z
         .string()
         .describe(
-          "One of: repos | search | outdated | add | remove | resolve | update_repos | create",
+          "One of: repos | search | outdated | add | remove | resolve | upgrade | update_repos | create",
         ),
       project: z
         .string()
@@ -1174,7 +1202,15 @@ const toolTable: readonly ToolRegistrar[] = [
         .string()
         .optional()
         .describe("Package id for add/remove, or the search query for search"),
-      version: z.string().optional().describe("add only: explicit version"),
+      version: z.string().optional().describe("add/upgrade: explicit version (with 'package')"),
+      clean_library: z
+        .boolean()
+        .optional()
+        .describe(
+          "After add/remove/resolve/upgrade: delete the project's derived " +
+            "Library/Bee and Library/ScriptAssemblies caches (default true; " +
+            "never runs while that project's editor is open)",
+        ),
       template: z
         .string()
         .optional()
@@ -1291,7 +1327,276 @@ const toolTable: readonly ToolRegistrar[] = [
           }),
         );
       }
+      if (
+        spec.write &&
+        args.clean_library !== false &&
+        args.project !== undefined &&
+        ["add", "remove", "resolve", "upgrade"].includes(args.action)
+      ) {
+        // P1-2: stale Bee/ScriptAssemblies after a package change put the
+        // NEXT editor start into Safe Mode ("Unable to resolve reference").
+        // Derived caches only, and never under a live editor.
+        const editor = editorOpenOn(args.project);
+        if (editor.open) {
+          body.libraryClean = {
+            skipped: true,
+            reason:
+              `Unity (pid ${editor.pid}) has this project open - the stale-cache risk applies to the ` +
+              "NEXT start; close the editor and clean then, or pass clean_library:false to silence this",
+          };
+        } else {
+          try {
+            body.libraryClean = cleanDerivedLibrary(args.project);
+          } catch (err) {
+            body.libraryClean = { skipped: true, reason: (err as Error).message };
+          }
+        }
+      }
       return ok(body);
+    },
+  ),
+
+  tool(
+    "unity_editor",
+    "Unity Editor process lifecycle for a project - needs no running editor " +
+      "(editorless layer). Actions: status (discovery-registry view of known " +
+      "editors with pid liveness), launch (resolves Unity.exe via " +
+      "editor_path > VCC settings > Unity Hub path, refuses when that " +
+      "project is already open, spawns detached with -projectPath - never " +
+      "-openfile, which hangs Unity - and by default waits until the bridge " +
+      "registers), quit (graceful close first; an unsaved-scene dialog can " +
+      "keep the editor alive - BUSY_MODAL will name it - then force:true " +
+      "for a hard kill, which can corrupt Library).",
+    {
+      action: z.string().describe("One of: status | launch | quit"),
+      project: z
+        .string()
+        .optional()
+        .describe("Project directory path (launch/quit: required; status: optional filter)"),
+      editor_path: z.string().optional().describe("launch: explicit Unity.exe path override"),
+      wait_ready: z
+        .boolean()
+        .optional()
+        .describe("launch: wait until the plugin registers in discovery (default true)"),
+      timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("launch ready-wait / quit grace budget in ms (defaults 180000 / 15000)"),
+      force: z
+        .boolean()
+        .optional()
+        .describe("quit: hard-kill when graceful close does not exit in time (default false)"),
+    },
+    async (args) => {
+      const norm = (p: string): string => p.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+      if (args.action === "status") {
+        let editors = readEditorRegistry();
+        if (args.project !== undefined) {
+          const want = norm(args.project);
+          editors = editors.filter((e) => norm(e.projectPath) === want);
+        }
+        return ok({ editors });
+      }
+      if (args.action === "launch") {
+        if (args.project === undefined) {
+          return fail(
+            new UnityMcpError({
+              code: "INVALID_PARAMS",
+              message: "unity_editor launch: 'project' is required",
+              retryable: false,
+            }),
+          );
+        }
+        const already = editorOpenOn(args.project);
+        if (already.open) {
+          return ok({
+            launched: false,
+            alreadyRunning: true,
+            pid: already.pid,
+            note: "an editor already has this project open - a second instance would fail on the project lock",
+          });
+        }
+        const resolved = resolveUnityExe(args.project, args.editor_path);
+        if (resolved.exe === null) {
+          return fail(
+            new UnityMcpError({
+              code: "INVALID_PARAMS",
+              message:
+                `unity_editor launch: no Unity.exe found for this project (m_EditorVersion=${resolved.version ?? "unknown"}). ` +
+                "Tried editor_path, VCC settings unityEditors and the Unity Hub install path - pass editor_path explicitly.",
+              retryable: false,
+            }),
+          );
+        }
+        const spawned = launchUnity(args.project, resolved.exe);
+        const body: Record<string, unknown> = {
+          launched: true,
+          pid: spawned.pid,
+          exe: resolved.exe,
+          exeSource: resolved.source,
+          editorVersion: resolved.version,
+        };
+        if (args.wait_ready !== false) {
+          const deadline = Date.now() + (args.timeout_ms ?? 180_000);
+          let ready = false;
+          while (Date.now() < deadline) {
+            const state = editorOpenOn(args.project);
+            if (state.open) {
+              ready = true;
+              body.bridgePid = state.pid;
+              break;
+            }
+            await sleep(2_000);
+          }
+          body.ready = ready;
+          if (!ready) {
+            body.hint =
+              "editor process started but the bridge has not registered yet - a consent dialog, " +
+              "Safe Mode prompt or long import may be in the way; unity_health_check / BUSY_MODAL will say which";
+          }
+        }
+        return ok(body);
+      }
+      if (args.action === "quit") {
+        if (args.project === undefined) {
+          return fail(
+            new UnityMcpError({
+              code: "INVALID_PARAMS",
+              message: "unity_editor quit: 'project' is required",
+              retryable: false,
+            }),
+          );
+        }
+        const state = editorOpenOn(args.project);
+        if (!state.open || state.pid === undefined) {
+          return ok({
+            closed: false,
+            running: false,
+            note: "no live editor is registered on this project (nothing to quit)",
+          });
+        }
+        const graceful = closeProcessGracefully(state.pid);
+        const deadline = Date.now() + (args.timeout_ms ?? 15_000);
+        while (Date.now() < deadline && pidAlive(state.pid)) {
+          await sleep(1_000);
+        }
+        if (!pidAlive(state.pid)) {
+          return ok({ closed: true, forced: false, pid: state.pid });
+        }
+        if (args.force === true) {
+          const killed = killProcess(state.pid);
+          const hardDeadline = Date.now() + 5_000;
+          while (Date.now() < hardDeadline && pidAlive(state.pid)) {
+            await sleep(500);
+          }
+          return ok({
+            closed: !pidAlive(state.pid),
+            forced: true,
+            pid: state.pid,
+            note: "forced kill - if the editor was mid-write, clean Library/Bee before the next start",
+            detail: killed.detail,
+          });
+        }
+        return ok({
+          closed: false,
+          running: true,
+          pid: state.pid,
+          graceRequested: graceful.requested,
+          hint:
+            "still running after the grace window - a save/confirm dialog may be holding it " +
+            "(unsaved scene). Handle the dialog in the editor, or rerun with force:true " +
+            "(forced kill can corrupt Library)",
+        });
+      }
+      return fail(
+        new UnityMcpError({
+          code: "INVALID_PARAMS",
+          message: `unity_editor: unknown action '${args.action}' (status|launch|quit)`,
+          retryable: false,
+        }),
+      );
+    },
+  ),
+
+  tool(
+    "asset_import",
+    "Import a .unitypackage into the running Unity project as a first-class " +
+      "operation (asset.importPackage) - the entry point for BOOTH assets. " +
+      "Always non-interactive (no import dialog); answers with the list of " +
+      "imported/changed asset paths. A package containing scripts triggers a " +
+      "compile + domain reload: the call may then answer DOMAIN_RELOAD " +
+      "(retryable) while the import itself completes - verify with " +
+      "get_editor_state or vcc afterwards instead of importing again. " +
+      "Existing assets at the same paths are overwritten. For FBX/texture " +
+      "importer settings use the asset-import recipes " +
+      "(fbx_import_settings_batch, texture_format_batch).",
+    {
+      path: z.string().describe("Absolute path to the .unitypackage file"),
+      timeout_ms: z.number().int().positive().optional().describe("Per-call timeout in ms (default 300000 - imports are slow)"),
+      project: projectArg,
+    },
+    async (args, ctx, extra) => {
+      const { client } = ctx.pool.resolve(args.project);
+      const bridge = makeProgressBridge(extra);
+      try {
+        const result = await client.call(
+          "asset.importPackage",
+          { path: args.path },
+          {
+            timeoutMs: args.timeout_ms ?? 300_000,
+            onProgress: bridge.onProgress,
+            signal: extra.signal,
+          },
+        );
+        return ok(result);
+      } finally {
+        bridge.done();
+      }
+    },
+  ),
+
+  tool(
+    "vrc_menu",
+    "Expression-menu inspection for the avatar (needs the VRChat Avatars " +
+      "SDK in the project). action:'tree' dumps the full menu hierarchy " +
+      "(names, types, parameters, submenus, cycle-safe). action:'audit' " +
+      "judges every control on three axes: parameter declared in " +
+      "expressionParameters, parameter present in a source animator, and - " +
+      "the axis that actually catches dead menu items - whether the " +
+      "transforms animated by the layers using that parameter still exist " +
+      "on the avatar. Judged on SOURCE controllers (post-bake AAO merges " +
+      "false-positive); humanoid muscle curves and known internal dummies " +
+      "are excluded. Read-only.",
+    {
+      action: z.string().describe("One of: tree | audit"),
+      avatar: z
+        .string()
+        .optional()
+        .describe("Avatar object name/path; default = first VRCAvatarDescriptor in loaded scenes"),
+      timeout_ms: z.number().int().positive().optional().describe("Per-call timeout in ms"),
+      project: projectArg,
+    },
+    async (args, ctx, extra) => {
+      const { client } = ctx.pool.resolve(args.project);
+      const method =
+        args.action === "tree" ? "vrc.menuTree" : args.action === "audit" ? "vrc.menuAudit" : null;
+      if (method === null) {
+        return fail(
+          new UnityMcpError({
+            code: "INVALID_PARAMS",
+            message: `vrc_menu: unknown action '${args.action}' (tree|audit)`,
+            retryable: false,
+          }),
+        );
+      }
+      const result = await client.call(
+        method,
+        { ...(args.avatar !== undefined ? { avatar: args.avatar } : {}) },
+        { timeoutMs: args.timeout_ms ?? AUDIT_CALL_TIMEOUT_MS, signal: extra.signal },
+      );
+      return ok(result);
     },
   ),
 ];

@@ -27,7 +27,7 @@ try {
     )
     .map((tool) => tool.name);
 
-  assert.equal(listed.tools.length, 15);
+  assert.equal(listed.tools.length, 18);
   assert.deepEqual(missingAnnotations, []);
   assert.ok(firstBlockLength <= 512);
   assert.match(instructions, /Never create the vrc_upload arm file/);

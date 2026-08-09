@@ -8,6 +8,7 @@
 // late handler result is dropped.
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -158,11 +159,25 @@ namespace TunaSync.UnityMCP.Editor
             if (MainThreadPump.LastTickAgoMs > BusyModalThresholdMs)
             {
                 bool batch = McpEditorInfo.IsBatchMode;
+                // Name the blocker when there is one: a native dialog stall
+                // looks identical to a long import from the outside, and that
+                // ambiguity once cost a three-hour wait. The probe runs pure
+                // user32 on this (background) thread - never the Unity API.
+                List<ModalProbe.ModalInfo> modals = ModalProbe.Describe();
+                string modalLine = "";
+                if (modals != null)
+                {
+                    ModalProbe.ModalInfo m = modals[0];
+                    modalLine = "\n  modal: \"" + m.title + "\"  buttons: [" +
+                        string.Join(", ", m.buttons.ToArray()) + "]" +
+                        (modals.Count > 1 ? "  (+" + (modals.Count - 1) + " more)" : "") +
+                        "\n  A human must dismiss this dialog in the editor UI; retrying alone will not clear it.";
+                }
                 ErrorObj busy = ErrorObj.Make(ErrorCodes.BusyModal,
                     "editor main thread unresponsive for " + MainThreadPump.LastTickAgoMs + " ms" +
                     (batch
                         ? " (batchmode process without an editor loop - likely a stale worker; check the discovery registry)"
-                        : ""),
+                        : "") + modalLine,
                     retryable: !batch);
                 busy.Detail = new
                 {
@@ -171,6 +186,8 @@ namespace TunaSync.UnityMCP.Editor
                     projectName = McpEditorInfo.ProjectName,
                     batchMode = batch,
                     lastTickAgoMs = MainThreadPump.LastTickAgoMs,
+                    modal = modals != null ? modals[0] : null,
+                    modalCount = modals != null ? modals.Count : 0,
                 };
                 session.Send(Frames.ResError(env.Id, busy));
                 return;

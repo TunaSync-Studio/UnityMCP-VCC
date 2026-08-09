@@ -122,9 +122,19 @@ Backpressure: max 32 in-flight `req` per connection → `PROTOCOL_ERROR`.
 Plugin-side: `PARSE_ERROR, PROTOCOL_ERROR, VERSION_UNSUPPORTED,
 HELLO_TIMEOUT, AUTH_REQUIRED, METHOD_NOT_FOUND, INVALID_PARAMS,
 HANDLER_EXCEPTION, TIMEOUT, CANCELLED, DOMAIN_RELOAD*, BUSY_MODAL*,
-LEASE_HELD, LEASE_LOST, JOB_NOT_FOUND, JOB_NOT_RESUMABLE,
-EVAL_COMPILE_ERROR, EVAL_RUNTIME_ERROR,
+PLAY_MODE_ACTIVE, LEASE_HELD, LEASE_LOST, JOB_NOT_FOUND,
+JOB_NOT_RESUMABLE, EVAL_COMPILE_ERROR, EVAL_RUNTIME_ERROR,
 EVAL_ENGINE_UNAVAILABLE` (`*` = retryable:true).
+
+`BUSY_MODAL.detail` = `{pid, projectPath, projectName, batchMode,
+lastTickAgoMs, modal?, modalCount}` — `modal {title, buttons[]}` names the
+native dialog blocking the main thread when one exists (Windows; probed via
+user32 off the main thread). A named modal means a human must dismiss it;
+retrying alone will not clear it.
+
+`PLAY_MODE_ACTIVE`: `eval.run` refuses while the editor is in play mode
+unless `allowPlayMode:true` — play-mode scene edits revert on exit while
+asset changes persist.
 
 Server-synthesized: `UNITY_UNREACHABLE, PROJECT_NOT_FOUND,
 PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
@@ -137,7 +147,7 @@ PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
 | `sys.status` | volatile snapshot: compiling, playMode, lastTickAgoMs, jobs summary, lease. Served from transport thread (no main-thread hop) |
 | `sys.compile.status` | last compile result: `{compiling, finishedAt?, diagnostics[]}` (persisted across reload) |
 | `sys.echo` | `{...}` → same back (tests) |
-| `eval.run` | `{code, captureLogs?, run_as_job?}` → `{result, logs[], executionMs, engine}` |
+| `eval.run` | `{code, captureLogs?, run_as_job?, allowPlayMode?}` → `{result, logs[], executionMs, engine}`; refused with `PLAY_MODE_ACTIVE` in play mode unless `allowPlayMode:true` (checked again at job execution time) |
 | `lease.acquire` / `lease.release` / `lease.status` / `lease.takeover` | write lease, default TTL 120 s; `{ttlMs?}` per acquire/takeover (clamped 5 s-1 h). Identity = the connection's `hello.client.sessionId`; a foreign `clientId` is INVALID_PARAMS |
 | `job.submit` | `{method, params}` → `{jobId}` |
 | `job.status` | `{jobId?}` → one JobRecord; omitted → ALL records as a **bare array** (`JobManager.AllRecords()`) |
@@ -145,7 +155,8 @@ PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
 | `job.cancel` | `{jobId}` |
 
 Product tools (P3) add `scene.query`, `state.get`, `logs.get`,
-`camera.capture`, `vrc.*`, `ndmf.*` — same envelope rules.
+`camera.capture`, `asset.importPackage`, `vrc.*` (incl. `vrc.menuTree` /
+`vrc.menuAudit`), `ndmf.*` — same envelope rules.
 
 ## Domain reload ritual (plugin)
 

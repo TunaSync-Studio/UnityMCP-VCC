@@ -128,6 +128,7 @@ export type ErrorCode =
   | "CANCELLED"
   | "DOMAIN_RELOAD"
   | "BUSY_MODAL"
+  | "PLAY_MODE_ACTIVE"
   | "LEASE_HELD"
   | "LEASE_LOST"
   | "JOB_NOT_FOUND"

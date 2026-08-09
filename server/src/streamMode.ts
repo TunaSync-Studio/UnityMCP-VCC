@@ -37,6 +37,8 @@ export const STREAM_LOCKED_TOOLS: ReadonlySet<string> = new Set([
   "ndmf_bake_run", // writes assets
   "vrc_upload", // publishing path (locked even for dry_run: keep the surface zero)
   "vpm_manage", // modifies projects / shells out (locked whole: keep the surface zero)
+  "unity_editor", // process control + enumerates every project on the machine
+  "asset_import", // writes into the project (can overwrite assets)
   "vcc_project", // F-27: enumerates every project on the machine (WIP names leak on stream)
 ]);
 

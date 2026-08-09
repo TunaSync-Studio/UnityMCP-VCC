@@ -71,7 +71,7 @@ package/com.tunasync.unity-mcp  (Editor-only VPM/UPM package)
 - Kill switch: create `UnityMCP.disabled` at the project root (menu:
   Tools > TunaSync Unity MCP > Toggle Disabled Marker).
 
-## Tool surface (15)
+## Tool surface (18)
 
 `execute_editor_command` (C# eval, `run_as_job` for long snippets),
 `get_editor_state` (sectioned + `max_bytes` guard), `scene_query`,
@@ -89,6 +89,14 @@ ever starts — via the open-source
 the tool answers with install instructions while `vcc_project` keeps
 working). Both are locked in streaming mode like the other destructive
 tools.
+
+v2.6.0 adds three more: `unity_editor` (launch / quit / status for the
+editor process itself — Unity.exe resolved via VCC settings or the Hub,
+`-projectPath` spawn only, graceful quit first), `asset_import`
+(first-class non-interactive `.unitypackage` import that answers with the
+imported asset list) and `vrc_menu` (expression-menu `tree` / `audit`;
+the audit flags dead menu items by checking that the transforms a
+parameter's layers animate still exist on the avatar).
 
 Everything the legacy 426 tools did is preserved as 400+ **recipes**
 (`recipes/`): markdown files whose fenced C# block you can paste into

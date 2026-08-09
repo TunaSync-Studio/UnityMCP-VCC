@@ -6,6 +6,51 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-08-09
+
+Unity plugin + npm server release: the MCP-completeness roadmap from the
+2026-08-09 field session (avatar maintenance work that had to leave the
+MCP repeatedly). Supersedes 2.5.0 on npm — 2.5.0 shipped to GitHub only
+and everything in it is included here.
+
+### Added
+- **`BUSY_MODAL` names the blocking dialog** (P0-1): `detail.modal
+  {title, buttons[]}` plus a message line naming the native dialog
+  (probed via user32 off the main thread), so "long import" and "modal
+  nobody clicks" are finally distinguishable — that ambiguity cost the
+  field session three hours. Detection only: pressing buttons stays a
+  human decision.
+- **Play-mode guard for C# execution** (P0-2): `eval.run` (inline and
+  job) refuses with `PLAY_MODE_ACTIVE` while the editor is playing,
+  because scene edits then revert on exit while asset changes persist.
+  `execute_editor_command allow_play_mode:true` is the explicit opt-in.
+- **`vpm_manage action:"upgrade"`** (P1-1): one package or everything;
+  conflict warnings that `-y` auto-accepts are surfaced verbatim.
+- **Derived-cache clean after package writes** (P1-2): add / remove /
+  resolve / upgrade delete `Library/Bee` + `Library/ScriptAssemblies`
+  (`clean_library`, default true; refuses while that project's editor is
+  open; `PackageCache`/`ArtifactDB` are never touched). Stale caches sent
+  the next editor start into Safe Mode three times in the field session.
+- **`unity_editor` tool** (P1-3): launch / quit / status for the editor
+  process (editorless layer). Unity.exe resolves via editor_path > VCC
+  settings > Unity Hub; `-projectPath` spawn only (never `-openfile`,
+  which hangs Unity); refuses a second instance on an open project; quit
+  is graceful-first with an explicit `force` escalation.
+- **`asset_import` tool** (P2-1): first-class non-interactive
+  `.unitypackage` import answering with the imported asset list.
+- **`vrc_menu` tool** (P2-3): expression-menu `tree` and `audit`. The
+  audit's third axis — do the transforms a parameter's layers animate
+  still exist? — is what catches dead menu items; the first two axes
+  (declared, consumed) looked fine for all eight found in the field.
+  Source-controller judgement; AAO/SDK internal dummies excluded.
+- **`vrc_avatar_audit` texture supplement** (P2-2):
+  `textureMegabytesAnimOnly` adds textures reachable only through
+  animation object-reference curves (the Modular Avatar material-swap
+  case) that `stats.textureMegabytes` cannot see (~8% on a measured
+  avatar).
+
+Tool surface: 15 → 18.
+
 ## [2.5.0] - 2026-08-09
 
 Unity plugin and npm server release focused on operator UX and local

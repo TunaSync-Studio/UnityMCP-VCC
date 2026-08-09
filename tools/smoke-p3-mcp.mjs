@@ -73,7 +73,7 @@ notify("notifications/initialized", {});
 
 const tools = await rpc("tools/list", {});
 const names = (tools.result?.tools || []).map((t) => t.name).sort();
-check("mcp.tools-15", names.length === 15, names.length + ": " + names.join(","));
+check("mcp.tools-18", names.length === 18, names.length + ": " + names.join(","));
 
 // health (composes discovery + sys.status)
 const h = await callTool("unity_health_check", { verbose: false });

@@ -9,7 +9,7 @@
 //     reimplement dependency resolution.
 //
 // Everything here is plain filesystem/process work: no TCP, no plugin.
-import { execFile } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -345,10 +345,247 @@ export function vpmActionSpec(
       return { args: ["resolve", "--project", needProject()], json: false, write: true };
     case "update_repos":
       return { args: ["update"], json: false, write: true };
+    case "upgrade": {
+      // P1-1. No package = upgrade everything in the project. `-y` also
+      // waives vrc-get's conflict confirmation, so the caller MUST surface
+      // stdout/stderr verbatim - a liltoon-style conflict warning sailing
+      // through silently is exactly the failure mode this note guards.
+      const a = ["upgrade", "--project", needProject()];
+      if (opts.package) {
+        a.push(opts.package);
+        if (opts.version) a.push(opts.version);
+      }
+      a.push("-y");
+      return { args: a, json: false, write: true };
+    }
     default:
       throw new Error(
         `vpm_manage: unknown action '${action}' ` +
-          "(repos|search|outdated|add|remove|resolve|update_repos)",
+          "(repos|search|outdated|add|remove|resolve|upgrade|update_repos)",
       );
   }
+}
+
+// ---- P1-2: derived-cache hygiene after package writes ----------------------
+
+function registryDir(): string {
+  const override = process.env.UNITY_MCP_REGISTRY_DIR;
+  if (override && override.length > 0) return override;
+  const localAppData =
+    process.env.LOCALAPPDATA && process.env.LOCALAPPDATA.length > 0
+      ? process.env.LOCALAPPDATA
+      : path.join(os.homedir(), "AppData", "Local");
+  return path.join(localAppData, "UnityMCP", "registry");
+}
+
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string): string => p.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+  return norm(a) === norm(b);
+}
+
+/**
+ * Is a LIVE Unity editor registered on this project? Reads the discovery
+ * registry and liveness-checks the recorded pid - deleting Library folders
+ * under a running editor is how projects get corrupted, so the cleaner
+ * refuses while this returns open:true.
+ */
+export function editorOpenOn(projectPath: string): { open: boolean; pid?: number } {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(registryDir());
+  } catch {
+    return { open: false };
+  }
+  for (const name of entries) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(registryDir(), name), "utf8")) as {
+        projectPath?: string;
+        pid?: number;
+      };
+      if (!parsed.projectPath || typeof parsed.pid !== "number") continue;
+      if (!samePath(parsed.projectPath, projectPath)) continue;
+      try {
+        process.kill(parsed.pid, 0);
+        return { open: true, pid: parsed.pid };
+      } catch {
+        // dead pid: stale entry, not an open editor
+      }
+    } catch {
+      // unreadable/corrupt entry - resilience over strictness (2.5.0 rule)
+    }
+  }
+  return { open: false };
+}
+
+// ---- P1-3: Unity editor lifecycle (editorless layer) -----------------------
+
+export interface EditorRegistryEntry {
+  projectPath: string;
+  projectName?: string;
+  pid: number;
+  port?: number;
+  alive: boolean;
+}
+
+/** Discovery-registry entries with pid liveness resolved (stale entries kept, flagged dead). */
+export function readEditorRegistry(): EditorRegistryEntry[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(registryDir());
+  } catch {
+    return [];
+  }
+  const out: EditorRegistryEntry[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(registryDir(), name), "utf8")) as {
+        projectPath?: string;
+        projectName?: string;
+        pid?: number;
+        port?: number;
+      };
+      if (!parsed.projectPath || typeof parsed.pid !== "number") continue;
+      let alive = false;
+      try {
+        process.kill(parsed.pid, 0);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+      out.push({
+        projectPath: parsed.projectPath,
+        projectName: parsed.projectName,
+        pid: parsed.pid,
+        port: typeof parsed.port === "number" ? parsed.port : undefined,
+        alive,
+      });
+    } catch {
+      // corrupt entry: skip (resilience over strictness)
+    }
+  }
+  return out;
+}
+
+/** m_EditorVersion from ProjectSettings/ProjectVersion.txt, or null. */
+export function projectEditorVersion(projectPath: string): string | null {
+  try {
+    const t = fs.readFileSync(
+      path.join(projectPath, "ProjectSettings", "ProjectVersion.txt"),
+      "utf8",
+    );
+    return /m_EditorVersion:\s*(\S+)/.exec(t)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Locate the Unity.exe for a project: explicit editor_path > VCC
+ * settings.json unityEditors matching the project's m_EditorVersion >
+ * the Unity Hub conventional install path for that version.
+ */
+export function resolveUnityExe(
+  projectPath: string,
+  explicit?: string,
+): { exe: string | null; source: string; version: string | null } {
+  const version = projectEditorVersion(projectPath);
+  if (explicit) {
+    return { exe: fs.existsSync(explicit) ? explicit : null, source: "editor_path", version };
+  }
+  try {
+    const settings = JSON.parse(fs.readFileSync(vccSettingsPath(), "utf8")) as {
+      unityEditors?: unknown;
+      pathToUnityExe?: unknown;
+    };
+    const editors = Array.isArray(settings.unityEditors) ? settings.unityEditors : [];
+    for (const entry of editors) {
+      const p =
+        typeof entry === "string"
+          ? entry
+          : typeof (entry as { path?: unknown }).path === "string"
+            ? (entry as { path: string }).path
+            : null;
+      if (!p || !fs.existsSync(p)) continue;
+      if (version === null || p.includes(version)) {
+        return { exe: p, source: "vcc.unityEditors", version };
+      }
+    }
+    if (
+      typeof settings.pathToUnityExe === "string" &&
+      settings.pathToUnityExe.length > 0 &&
+      fs.existsSync(settings.pathToUnityExe) &&
+      (version === null || settings.pathToUnityExe.includes(version))
+    ) {
+      return { exe: settings.pathToUnityExe, source: "vcc.pathToUnityExe", version };
+    }
+  } catch {
+    // no readable VCC settings: fall through to the Hub convention
+  }
+  if (version !== null) {
+    const programFiles = process.env.ProgramFiles ?? "C:/Program Files";
+    const hub = path.join(programFiles, "Unity", "Hub", "Editor", version, "Editor", "Unity.exe");
+    if (fs.existsSync(hub)) return { exe: hub, source: "hub", version };
+  }
+  return { exe: null, source: "none", version };
+}
+
+/**
+ * Spawn a detached editor with -projectPath (argv array keeps spaced paths
+ * intact). Deliberately NEVER -openfile: it left Unity at 0 s CPU and
+ * unresponsive for 18 minutes in the 2026-08-09 field session - open scenes
+ * after startup via EditorSceneManager instead.
+ */
+export function launchUnity(projectPath: string, exe: string): { pid: number } {
+  const child = spawn(exe, ["-projectPath", projectPath], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  if (typeof child.pid !== "number") throw new Error("Unity spawn returned no pid");
+  return { pid: child.pid };
+}
+
+/** Graceful close first: taskkill without /F posts WM_CLOSE. */
+export function closeProcessGracefully(pid: number): { requested: boolean; detail: string } {
+  const r = spawnSync("taskkill", ["/PID", String(pid)], { encoding: "utf8" });
+  return { requested: r.status === 0, detail: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
+}
+
+/** Forced kill - can corrupt Library; only after a graceful attempt. */
+export function killProcess(pid: number): { requested: boolean; detail: string } {
+  const r = spawnSync("taskkill", ["/PID", String(pid), "/F"], { encoding: "utf8" });
+  return { requested: r.status === 0, detail: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
+}
+
+export function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete DERIVED editor caches after a package write. Scope is deliberately
+ * narrow: Library/Bee and Library/ScriptAssemblies - the two that leave the
+ * next start in Safe Mode ("Unable to resolve reference 'UniTask'") when
+ * stale. Library/PackageCache and Library/ArtifactDB re-import for tens of
+ * minutes and are never touched.
+ */
+export function cleanDerivedLibrary(projectPath: string): { cleaned: string[]; absent: string[] } {
+  const cleaned: string[] = [];
+  const absent: string[] = [];
+  for (const name of ["Bee", "ScriptAssemblies"]) {
+    const target = path.join(projectPath, "Library", name);
+    if (fs.existsSync(target)) {
+      fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+      cleaned.push(`Library/${name}`);
+    } else {
+      absent.push(`Library/${name}`);
+    }
+  }
+  return { cleaned, absent };
 }

@@ -26,7 +26,7 @@ namespace TunaSync.UnityMCP.Editor
     /// </summary>
     public static class McpEditorInfo
     {
-        public const string PluginVersion = "2.5.0";
+        public const string PluginVersion = "2.6.0";
 
         private const string SessionIdKey = "TunaSync.UnityMCP.SessionId.v1";
         private const string ReloadCountKey = "TunaSync.UnityMCP.ReloadCount.v1";
@@ -244,11 +244,15 @@ namespace TunaSync.UnityMCP.Editor
                 EvalHandlers.RegisterAll();
                 StateHandlers.RegisterAll();
                 CaptureHandlers.RegisterAll();
+                AssetHandlers.RegisterAll();     // asset.importPackage (P2-1)
 #if MCP_NDMF
                 NdmfHandlers.RegisterAll();      // ndmf.bake job executor
 #endif
 #if MCP_VRCSDK3_AVATARS || MCP_VRCSDK3_WORLDS
                 VrcHandlers.RegisterAll();       // vrc.upload executor (+ vrc.avatarAudit)
+#endif
+#if MCP_VRCSDK3_AVATARS
+                VrcMenuHandlers.RegisterAll();   // vrc.menuTree / vrc.menuAudit (P2-3)
 #endif
 
                 // Registered AFTER CompileGate.Init so the ritual runs second.

@@ -27,6 +27,7 @@ namespace TunaSync.UnityMCP.Editor
             }
             bool captureLogs = ReadBool(p, "captureLogs", true);
             bool runAsJob = ReadBool(p, "runAsJob", false);
+            ThrowIfPlayModeBlocked(ReadBool(p, "allowPlayMode", false));
 
             if (runAsJob)
             {
@@ -36,6 +37,22 @@ namespace TunaSync.UnityMCP.Editor
 
             return await EvalService.RunAsync(code, captureLogs, ctx.Token,
                 (pct, message, phase) => ctx.Progress(pct, message, phase));
+        }
+
+        /// <summary>
+        /// P0-2: scene edits made in play mode silently revert on exit while
+        /// AssetDatabase changes persist, leaving scene and assets divergent.
+        /// Block writes by default; an explicit allowPlayMode is an informed
+        /// opt-in. Main thread only (reads EditorApplication).
+        /// </summary>
+        internal static void ThrowIfPlayModeBlocked(bool allowPlayMode)
+        {
+            if (allowPlayMode) return;
+            if (!UnityEditor.EditorApplication.isPlaying) return;
+            throw new McpHandlerException(ErrorCodes.PlayModeActive,
+                "the editor is in play mode: scene changes made now revert on exit while asset " +
+                "changes persist, leaving the project inconsistent. Exit play mode first, or pass " +
+                "allow_play_mode:true if you intend to touch the running scene.");
         }
 
         private static Task<object> JobSubmit(JObject p, RequestContext ctx)
@@ -142,6 +159,16 @@ namespace TunaSync.UnityMCP.Editor
                 try { captureLogs = cap.Value<bool>(); }
                 catch { captureLogs = true; }
             }
+            bool allowPlayMode = false;
+            JToken apm = ctx.Params["allowPlayMode"];
+            if (apm != null && apm.Type != JTokenType.Null)
+            {
+                try { allowPlayMode = apm.Value<bool>(); }
+                catch { allowPlayMode = false; }
+            }
+            // Same guard as the inline path: the job may execute long after
+            // submit, when play mode has started in the meantime.
+            EvalHandlers.ThrowIfPlayModeBlocked(allowPlayMode);
             return EvalService.RunAsync(code, captureLogs, ctx.Token,
                 (pct, message, phase) => ctx.Report(pct, message, phase));
         }

@@ -70,7 +70,7 @@ package/com.tunasync.unity-mcp  (Editor 専用 VPM/UPM パッケージ)
 - キルスイッチ: プロジェクト直下に `UnityMCP.disabled` を置く
   (メニュー: Tools > TunaSync Unity MCP > Toggle Disabled Marker)。
 
-## ツール面 (15)
+## ツール面 (18)
 
 `execute_editor_command` (C# eval・長い処理は `run_as_job`)、
 `get_editor_state` (セクション指定+`max_bytes` ガード)、`scene_query`、
@@ -88,6 +88,13 @@ resolve と追加パッケージ導入まで Unity 起動前に済ませる — 
 vrc-get が PATH に無い場合はインストール案内を返し、`vcc_project` はそのまま
 動き続けます)。「MA 入りの新しいアバタープロジェクト作って」が Unity を
 開く前に完了します。変更系は配信モードでは他の破壊系ツールと同様ロックされます。
+
+v2.6.0 でさらに3本: `unity_editor` (エディタプロセスの launch / quit /
+status — Unity.exe は VCC 設定か Hub から解決・`-projectPath` 起動のみ・
+quit は graceful 優先)、`asset_import` (`.unitypackage` の一級インポート・
+常に非対話・取込アセット一覧を返す)、`vrc_menu` (メニューの `tree` /
+`audit` — パラメータのレイヤーが animate する Transform の実在まで検査して
+「死にメニュー」を炙り出します)。
 
 旧 426 ツールの機能はすべて 400 本超の **レシピ** (`recipes/`) として保存されています:
 markdown 内のフェンス付き C# ブロックを `execute_editor_command` の `code` に

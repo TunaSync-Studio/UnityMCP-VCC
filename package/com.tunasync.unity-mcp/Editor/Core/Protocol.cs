@@ -92,6 +92,7 @@ namespace TunaSync.UnityMCP.Editor
         public const string EvalRuntimeError = "EVAL_RUNTIME_ERROR";
         public const string EvalEngineUnavailable = "EVAL_ENGINE_UNAVAILABLE";
         public const string AuthRequired = "AUTH_REQUIRED";
+        public const string PlayModeActive = "PLAY_MODE_ACTIVE";
     }
 
     public static class EventKind

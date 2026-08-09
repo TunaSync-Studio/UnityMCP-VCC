@@ -292,12 +292,13 @@ describe("tools over MCP", () => {
     }
   });
 
-  it("lists all 13 tools", async () => {
+  it("lists all 18 tools", async () => {
     h = await setup();
     const listed = await h.mcp.listTools();
     const names = listed.tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        "asset_import",
         "camera_capture",
         "execute_editor_command",
         "find_recipe",
@@ -308,14 +309,16 @@ describe("tools over MCP", () => {
         "ndmf_bake_run",
         "scene_query",
         "session_lease",
+        "unity_editor",
         "unity_health_check",
         "vcc_project",
         "vpm_manage",
         "vrc_avatar_audit",
+        "vrc_menu",
         "vrc_upload",
       ].sort(),
     );
-    expect(names).toHaveLength(15);
+    expect(names).toHaveLength(18);
   });
 
   it("exposes recipes as recipe:// resources", async () => {
