@@ -127,10 +127,12 @@ JOB_NOT_RESUMABLE, EVAL_COMPILE_ERROR, EVAL_RUNTIME_ERROR,
 EVAL_ENGINE_UNAVAILABLE` (`*` = retryable:true).
 
 `BUSY_MODAL.detail` = `{pid, projectPath, projectName, batchMode,
-lastTickAgoMs, modal?, modalCount}` — `modal {title, buttons[]}` names the
-native dialog blocking the main thread when one exists (Windows; probed via
-user32 off the main thread). A named modal means a human must dismiss it;
-retrying alone will not clear it.
+lastTickAgoMs, modal?, modalCount}` — `modal {title, buttons[], kind}` names
+the native dialog blocking the main thread when one exists (Windows; probed
+via user32 off the main thread). `kind` (2.6.1) is `"progress"` (a
+`(busy for MM:SS)` counter in the title or an `msctls_progress32` child —
+clears itself; do NOT press Cancel, that aborts the operation) or
+`"decision"` (a human must dismiss it; retrying alone will not clear it).
 
 `PLAY_MODE_ACTIVE`: `eval.run` refuses while the editor is in play mode
 unless `allowPlayMode:true` — play-mode scene edits revert on exit while

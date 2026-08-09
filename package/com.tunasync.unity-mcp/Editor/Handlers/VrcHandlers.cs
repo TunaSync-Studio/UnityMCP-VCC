@@ -186,7 +186,9 @@ namespace TunaSync.UnityMCP.Editor
                     "stats.textureMegabytes counts renderer-reachable textures only (treat as a " +
                     "lower bound); textureMegabytesAnimOnly adds textures reached exclusively " +
                     "through animation object-reference curves (e.g. Modular Avatar material " +
-                    "swaps), runtime-size estimate";
+                    "swaps), runtime-size estimate. NOTE: on an UNBAKED avatar this is always 0 " +
+                    "- Modular Avatar material swaps become animation curves only during the " +
+                    "NDMF build. Run ndmf_bake_run and audit the baked result for the true figure";
             }
             catch (Exception ex)
             {

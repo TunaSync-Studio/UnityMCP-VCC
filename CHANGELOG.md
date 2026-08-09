@@ -6,6 +6,40 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-08-09
+
+Unity plugin + npm server release: the four findings from the 2026-08-09
+field verification of 2.6.0 (three real avatar projects, every tool live).
+
+### Fixed
+- **Editor-open detection no longer depends on the MCP registry** (F-1):
+  `unity_editor` and the `clean_library` guard now check Unity's own
+  `Temp/UnityLockfile` first, then the discovery registry for the pid.
+  The registry-only check missed Safe-Mode/compile-failure editors — the
+  plugin is not loaded exactly when quit and cleanup matter most — and
+  let `clean_library` delete `Library/Bee` under a live editor (the one
+  real-harm finding). `quit` now locates unregistered editors by OS
+  process scan (command-line match on the project path) instead of
+  no-opping; `launch` refuses on a present lockfile and says when it may
+  be a stale crash leftover; skip/refuse messages name the evidence.
+  `launch`'s ready-wait still requires a *registry* entry, so the
+  lockfile appearing seconds after spawn cannot fake readiness.
+- **`BUSY_MODAL` distinguishes progress dialogs from decision dialogs**
+  (F-2): `detail.modal.kind` is `"progress"` (busy-counter title like
+  `(busy for 01:14)` or an `msctls_progress32` child) or `"decision"`.
+  Progress dialogs get "clears itself — do NOT press Cancel"; the old
+  blanket "a human must dismiss this" invited an agent to cancel a live
+  import/export.
+- **`textureMegabytesAnimOnly` note states the unbaked-is-always-0
+  rule** (F-3): Modular Avatar material swaps become animation curves
+  only during the NDMF build, so auditing the scene avatar shows 0;
+  the note now says to bake (`ndmf_bake_run`) and audit the result —
+  a field avatar hiding +16% behind material swaps would otherwise
+  read as "no hidden textures".
+- **Plugin honors `UNITY_MCP_REGISTRY_DIR`** (F-4): the C# registry dir
+  now takes the same env override as the server, unblocking discovery
+  on POSIX where the two sides disagreed on the default path.
+
 ## [2.6.0] - 2026-08-09
 
 Unity plugin + npm server release: the MCP-completeness roadmap from the

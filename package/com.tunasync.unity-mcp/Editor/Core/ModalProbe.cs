@@ -20,7 +20,17 @@ namespace TunaSync.UnityMCP.Editor
         {
             public string title;
             public List<string> buttons;
+            /// <summary>
+            /// F-2 (2.6.1): "progress" = clears itself, do NOT press Cancel
+            /// (aborts the operation); "decision" = a human must choose.
+            /// Progress markers: a "(busy for MM:SS)" counter in the title
+            /// (Unity's async-progress pattern) or an msctls_progress32 child.
+            /// </summary>
+            public string kind;
         }
+
+        private static readonly System.Text.RegularExpressions.Regex BusyCounter =
+            new System.Text.RegularExpressions.Regex(@"\(busy for [0-9:]+s?\)");
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -66,6 +76,7 @@ namespace TunaSync.UnityMCP.Editor
                         title = WindowText(hWnd),
                         buttons = new List<string>(),
                     };
+                    bool hasProgressBar = false;
                     EnumChildWindows(hWnd, (child, lParam2) =>
                     {
                         if (ClassNameIs(child, "Button"))
@@ -76,8 +87,15 @@ namespace TunaSync.UnityMCP.Editor
                                 info.buttons.Add(label.Replace("&", ""));
                             }
                         }
+                        else if (ClassNameIs(child, "msctls_progress32"))
+                        {
+                            hasProgressBar = true;
+                        }
                         return true;
                     }, IntPtr.Zero);
+                    info.kind = (hasProgressBar || (info.title != null && BusyCounter.IsMatch(info.title)))
+                        ? "progress"
+                        : "decision";
                     found.Add(info);
                     return true;
                 }, IntPtr.Zero);

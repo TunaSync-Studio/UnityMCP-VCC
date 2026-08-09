@@ -168,10 +168,16 @@ namespace TunaSync.UnityMCP.Editor
                 if (modals != null)
                 {
                     ModalProbe.ModalInfo m = modals[0];
+                    // F-2: a progress dialog clears itself - telling an agent
+                    // "a human must dismiss this" made it press Cancel and
+                    // abort live imports. Route the advice by kind.
+                    string advice = m.kind == "progress"
+                        ? "\n  This is a progress dialog; it clears itself. Do NOT press Cancel - that aborts the operation. Retry after it finishes."
+                        : "\n  A human must dismiss this dialog in the editor UI; retrying alone will not clear it.";
                     modalLine = "\n  modal: \"" + m.title + "\"  buttons: [" +
-                        string.Join(", ", m.buttons.ToArray()) + "]" +
+                        string.Join(", ", m.buttons.ToArray()) + "]  kind: " + m.kind +
                         (modals.Count > 1 ? "  (+" + (modals.Count - 1) + " more)" : "") +
-                        "\n  A human must dismiss this dialog in the editor UI; retrying alone will not clear it.";
+                        advice;
                 }
                 ErrorObj busy = ErrorObj.Make(ErrorCodes.BusyModal,
                     "editor main thread unresponsive for " + MainThreadPump.LastTickAgoMs + " ms" +

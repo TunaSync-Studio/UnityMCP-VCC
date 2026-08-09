@@ -23,9 +23,21 @@ namespace TunaSync.UnityMCP.Editor
         private static bool _tickerAdded;
         private static bool _active;
 
-        public static string RegistryDir => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "UnityMCP", "registry");
+        public static string RegistryDir
+        {
+            get
+            {
+                // F-4 (2.6.1): honor the same UNITY_MCP_REGISTRY_DIR override the
+                // Node server has, so both sides can agree on one directory on
+                // POSIX (where SpecialFolder.LocalApplicationData diverges from
+                // the server's LOCALAPPDATA fallback).
+                string overrideDir = Environment.GetEnvironmentVariable("UNITY_MCP_REGISTRY_DIR");
+                if (!string.IsNullOrEmpty(overrideDir)) return overrideDir;
+                return Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "UnityMCP", "registry");
+            }
+        }
 
         public static string FilePath => _filePath;
 

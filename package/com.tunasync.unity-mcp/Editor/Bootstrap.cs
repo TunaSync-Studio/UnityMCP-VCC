@@ -26,7 +26,7 @@ namespace TunaSync.UnityMCP.Editor
     /// </summary>
     public static class McpEditorInfo
     {
-        public const string PluginVersion = "2.6.0";
+        public const string PluginVersion = "2.6.1";
 
         private const string SessionIdKey = "TunaSync.UnityMCP.SessionId.v1";
         private const string ReloadCountKey = "TunaSync.UnityMCP.ReloadCount.v1";

@@ -9,9 +9,11 @@ import path from "node:path";
 import {
   cleanDerivedLibrary,
   editorOpenOn,
+  findUnityPidByProject,
   projectEditorVersion,
   readEditorRegistry,
   resolveUnityExe,
+  unityLockfilePresent,
   vpmActionSpec,
 } from "../src/vcc.js";
 
@@ -100,6 +102,70 @@ describe("editor liveness gate (P1-2)", () => {
   it("answers closed when the registry directory does not exist", () => {
     process.env.UNITY_MCP_REGISTRY_DIR = path.join(os.tmpdir(), "unitymcp-no-such-dir");
     expect(editorOpenOn("C:/proj").open).toBe(false);
+  });
+});
+
+describe("UnityLockfile stage (F-1, 2.6.1)", () => {
+  const saved = process.env.UNITY_MCP_REGISTRY_DIR;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.UNITY_MCP_REGISTRY_DIR;
+    else process.env.UNITY_MCP_REGISTRY_DIR = saved;
+  });
+
+  it("reports open via Temp/UnityLockfile when the registry has no entry (Safe Mode case)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-lock-"));
+    try {
+      const proj = path.join(tmp, "Proj");
+      fs.mkdirSync(path.join(proj, "Temp"), { recursive: true });
+      fs.writeFileSync(path.join(proj, "Temp", "UnityLockfile"), "");
+      process.env.UNITY_MCP_REGISTRY_DIR = path.join(tmp, "no-registry");
+      expect(unityLockfilePresent(proj)).toBe(true);
+      const res = editorOpenOn(proj);
+      expect(res.open).toBe(true);
+      expect(res.source).toBe("lockfile");
+      expect(res.pid).toBeUndefined();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the registry answer (with pid) when both signals exist", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-lock2-"));
+    try {
+      const proj = path.join(tmp, "Proj");
+      fs.mkdirSync(path.join(proj, "Temp"), { recursive: true });
+      fs.writeFileSync(path.join(proj, "Temp", "UnityLockfile"), "");
+      const reg = path.join(tmp, "registry");
+      fs.mkdirSync(reg);
+      fs.writeFileSync(
+        path.join(reg, "live.json"),
+        JSON.stringify({ projectPath: proj, pid: process.pid }),
+      );
+      process.env.UNITY_MCP_REGISTRY_DIR = reg;
+      const res = editorOpenOn(proj);
+      expect(res.open).toBe(true);
+      expect(res.source).toBe("registry");
+      expect(res.pid).toBe(process.pid);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("stays closed when neither registry nor lockfile exists", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-lock3-"));
+    try {
+      const proj = path.join(tmp, "Proj");
+      fs.mkdirSync(proj, { recursive: true });
+      process.env.UNITY_MCP_REGISTRY_DIR = path.join(tmp, "no-registry");
+      expect(unityLockfilePresent(proj)).toBe(false);
+      expect(editorOpenOn(proj).open).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("OS scan returns undefined for a project no Unity process has open", () => {
+    expect(findUnityPidByProject("Z:/no/such/unitymcp-f1-project")).toBeUndefined();
   });
 });
 

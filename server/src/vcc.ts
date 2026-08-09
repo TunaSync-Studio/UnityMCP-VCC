@@ -384,17 +384,85 @@ function samePath(a: string, b: string): boolean {
 }
 
 /**
- * Is a LIVE Unity editor registered on this project? Reads the discovery
- * registry and liveness-checks the recorded pid - deleting Library folders
- * under a running editor is how projects get corrupted, so the cleaner
- * refuses while this returns open:true.
+ * Unity's own per-project lock: `<project>/Temp/UnityLockfile` exists while an
+ * editor has the project open - independent of whether our plugin compiled.
+ * Can be left behind by a hard crash (stale lockfile), which errs in the safe
+ * direction for every caller (refuse to clean / refuse to double-launch).
  */
-export function editorOpenOn(projectPath: string): { open: boolean; pid?: number } {
-  let entries: string[];
+export function unityLockfilePresent(projectPath: string): boolean {
+  try {
+    return fs.existsSync(path.join(projectPath, "Temp", "UnityLockfile"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * OS-level fallback: pid of a running Unity editor whose command line contains
+ * this project path. Covers editors the registry cannot see - Safe Mode or a
+ * failed plugin compile, exactly the states quit/cleanup exist for.
+ */
+export function findUnityPidByProject(projectPath: string): number | undefined {
+  const want = projectPath.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+  try {
+    if (process.platform === "win32") {
+      const r = spawnSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Get-CimInstance Win32_Process -Filter \"Name='Unity.exe'\" | " +
+            'ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
+        ],
+        { encoding: "utf8", timeout: 15_000, windowsHide: true },
+      );
+      if (r.status !== 0 || !r.stdout) return undefined;
+      for (const line of r.stdout.split(/\r?\n/)) {
+        const tab = line.indexOf("\t");
+        if (tab <= 0) continue;
+        const pid = Number.parseInt(line.slice(0, tab).trim(), 10);
+        const cmd = line.slice(tab + 1).replaceAll("\\", "/").toLowerCase();
+        if (Number.isFinite(pid) && pid > 0 && cmd.includes(want)) return pid;
+      }
+      return undefined;
+    }
+    const r = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 15_000 });
+    if (r.status !== 0 || !r.stdout) return undefined;
+    for (const line of r.stdout.split("\n")) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+      const pidText = m?.[1];
+      const cmdText = m?.[2];
+      if (pidText === undefined || cmdText === undefined) continue;
+      const cmd = cmdText.replaceAll("\\", "/").toLowerCase();
+      if (cmd.includes("unity") && cmd.includes(want)) return Number.parseInt(pidText, 10);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Is a Unity editor open on this project? Two-stage (F-1):
+ *   1. discovery registry with pid liveness - gives the pid, but only sees
+ *      editors where the plugin loaded;
+ *   2. Temp/UnityLockfile - Unity's own truth, catches Safe-Mode/compile-fail
+ *      editors the registry misses (the state that once let clean_library
+ *      delete Library/Bee under a live editor).
+ * Deleting Library folders under a running editor is how projects get
+ * corrupted, so the cleaner refuses while this returns open:true.
+ */
+export function editorOpenOn(projectPath: string): {
+  open: boolean;
+  pid?: number;
+  source?: "registry" | "lockfile";
+} {
+  let entries: string[] = [];
   try {
     entries = fs.readdirSync(registryDir());
   } catch {
-    return { open: false };
+    // no registry dir yet - fall through to the lockfile check
   }
   for (const name of entries) {
     if (!name.endsWith(".json")) continue;
@@ -407,13 +475,16 @@ export function editorOpenOn(projectPath: string): { open: boolean; pid?: number
       if (!samePath(parsed.projectPath, projectPath)) continue;
       try {
         process.kill(parsed.pid, 0);
-        return { open: true, pid: parsed.pid };
+        return { open: true, pid: parsed.pid, source: "registry" };
       } catch {
         // dead pid: stale entry, not an open editor
       }
     } catch {
       // unreadable/corrupt entry - resilience over strictness (2.5.0 rule)
     }
+  }
+  if (unityLockfilePresent(projectPath)) {
+    return { open: true, source: "lockfile" };
   }
   return { open: false };
 }

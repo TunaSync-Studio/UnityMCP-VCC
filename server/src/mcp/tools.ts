@@ -24,6 +24,7 @@ import {
   createProject,
   defaultRunner,
   editorOpenOn,
+  findUnityPidByProject,
   findVrcGet,
   killProcess,
   launchUnity,
@@ -1338,10 +1339,17 @@ const toolTable: readonly ToolRegistrar[] = [
         // Derived caches only, and never under a live editor.
         const editor = editorOpenOn(args.project);
         if (editor.open) {
+          // F-1: name the evidence. source "lockfile" = the plugin never
+          // registered (Safe Mode / compile failure) - exactly the editor the
+          // registry-only check used to miss while Bee got deleted under it.
+          const who =
+            editor.source === "lockfile"
+              ? "Unity has this project open (Temp/UnityLockfile present; not in the MCP registry - Safe Mode or a failed plugin compile). If no editor is actually running, the lockfile may be stale from a crash"
+              : `Unity (pid ${editor.pid}) has this project open`;
           body.libraryClean = {
             skipped: true,
             reason:
-              `Unity (pid ${editor.pid}) has this project open - the stale-cache risk applies to the ` +
+              `${who} - the stale-cache risk applies to the ` +
               "NEXT start; close the editor and clean then, or pass clean_library:false to silence this",
           };
         } else {
@@ -1359,14 +1367,17 @@ const toolTable: readonly ToolRegistrar[] = [
   tool(
     "unity_editor",
     "Unity Editor process lifecycle for a project - needs no running editor " +
-      "(editorless layer). Actions: status (discovery-registry view of known " +
-      "editors with pid liveness), launch (resolves Unity.exe via " +
-      "editor_path > VCC settings > Unity Hub path, refuses when that " +
-      "project is already open, spawns detached with -projectPath - never " +
-      "-openfile, which hangs Unity - and by default waits until the bridge " +
-      "registers), quit (graceful close first; an unsaved-scene dialog can " +
-      "keep the editor alive - BUSY_MODAL will name it - then force:true " +
-      "for a hard kill, which can corrupt Library).",
+      "(editorless layer). Open-detection is two-stage: the MCP discovery " +
+      "registry, then Temp/UnityLockfile (Unity's own lock - catches Safe-" +
+      "Mode/compile-failure editors the registry misses). Actions: status " +
+      "(discovery-registry view of known editors with pid liveness), launch " +
+      "(resolves Unity.exe via editor_path > VCC settings > Unity Hub path, " +
+      "refuses when that project is already open, spawns detached with " +
+      "-projectPath - never -openfile, which hangs Unity - and by default " +
+      "waits until the bridge registers), quit (graceful close first; an " +
+      "unsaved-scene dialog can keep the editor alive - BUSY_MODAL will " +
+      "name it - then force:true for a hard kill, which can corrupt " +
+      "Library; unregistered editors are found by OS process scan).",
     {
       action: z.string().describe("One of: status | launch | quit"),
       project: z
@@ -1414,8 +1425,12 @@ const toolTable: readonly ToolRegistrar[] = [
           return ok({
             launched: false,
             alreadyRunning: true,
-            pid: already.pid,
-            note: "an editor already has this project open - a second instance would fail on the project lock",
+            pid: already.pid ?? findUnityPidByProject(args.project),
+            source: already.source,
+            note:
+              already.source === "lockfile"
+                ? "Temp/UnityLockfile is present - an unregistered editor (Safe Mode / plugin compile failure) or a crashed editor's stale lock holds this project; a second instance would fail on the project lock. If no Unity is actually running, delete Temp/UnityLockfile and retry"
+                : "an editor already has this project open - a second instance would fail on the project lock",
           });
         }
         const resolved = resolveUnityExe(args.project, args.editor_path);
@@ -1443,7 +1458,10 @@ const toolTable: readonly ToolRegistrar[] = [
           let ready = false;
           while (Date.now() < deadline) {
             const state = editorOpenOn(args.project);
-            if (state.open) {
+            // "ready" means the BRIDGE registered - the lockfile appears
+            // seconds after spawn, long before the plugin loads, and must
+            // not satisfy this wait.
+            if (state.open && state.source === "registry") {
               ready = true;
               body.bridgePid = state.pid;
               break;
@@ -1470,31 +1488,63 @@ const toolTable: readonly ToolRegistrar[] = [
           );
         }
         const state = editorOpenOn(args.project);
-        if (!state.open || state.pid === undefined) {
+        if (!state.open) {
           return ok({
             closed: false,
             running: false,
-            note: "no live editor is registered on this project (nothing to quit)",
+            note: "no editor holds this project (registry and Temp/UnityLockfile both clear - nothing to quit)",
           });
         }
-        const graceful = closeProcessGracefully(state.pid);
+        let pid = state.pid;
+        let pidSource: "registry" | "os-scan" = "registry";
+        if (pid === undefined) {
+          // F-1: lockfile says open but the plugin never registered (Safe
+          // Mode / compile failure) - the old registry-only path no-opped
+          // here, in exactly the state quit exists for. Find the editor at
+          // the OS level instead.
+          pid = findUnityPidByProject(args.project);
+          pidSource = "os-scan";
+          if (pid === undefined) {
+            return ok({
+              closed: false,
+              running: false,
+              lockfilePresent: true,
+              note:
+                "Temp/UnityLockfile is present but no Unity process matching this project was found - " +
+                "stale lockfile after a crash (delete it if you are sure no editor is open), or an " +
+                "editor this scan cannot see. Nothing was quit.",
+            });
+          }
+        }
+        const graceful = closeProcessGracefully(pid);
         const deadline = Date.now() + (args.timeout_ms ?? 15_000);
-        while (Date.now() < deadline && pidAlive(state.pid)) {
+        while (Date.now() < deadline && pidAlive(pid)) {
           await sleep(1_000);
         }
-        if (!pidAlive(state.pid)) {
-          return ok({ closed: true, forced: false, pid: state.pid });
+        const scanNote =
+          pidSource === "os-scan"
+            ? "editor located by OS process scan (not in MCP discovery - Safe Mode or plugin compile failure?)"
+            : undefined;
+        if (!pidAlive(pid)) {
+          return ok({
+            closed: true,
+            forced: false,
+            pid,
+            pidSource,
+            ...(scanNote !== undefined ? { note: scanNote } : {}),
+          });
         }
         if (args.force === true) {
-          const killed = killProcess(state.pid);
+          const killed = killProcess(pid);
           const hardDeadline = Date.now() + 5_000;
-          while (Date.now() < hardDeadline && pidAlive(state.pid)) {
+          while (Date.now() < hardDeadline && pidAlive(pid)) {
             await sleep(500);
           }
           return ok({
-            closed: !pidAlive(state.pid),
+            closed: !pidAlive(pid),
             forced: true,
-            pid: state.pid,
+            pid,
+            pidSource,
             note: "forced kill - if the editor was mid-write, clean Library/Bee before the next start",
             detail: killed.detail,
           });
@@ -1502,12 +1552,14 @@ const toolTable: readonly ToolRegistrar[] = [
         return ok({
           closed: false,
           running: true,
-          pid: state.pid,
+          pid,
+          pidSource,
           graceRequested: graceful.requested,
           hint:
             "still running after the grace window - a save/confirm dialog may be holding it " +
             "(unsaved scene). Handle the dialog in the editor, or rerun with force:true " +
-            "(forced kill can corrupt Library)",
+            "(forced kill can corrupt Library)" +
+            (scanNote !== undefined ? `. Note: ${scanNote}` : ""),
         });
       }
       return fail(
