@@ -61,7 +61,14 @@ namespace TunaSync.UnityMCP.Editor
         /// <summary>Auto-acquire for a mutating call. Main thread only (persists on change).</summary>
         public static bool EnsureHeldForWrite(string sessionId) => TryAcquire(sessionId);
 
-        /// <summary>Acquire or refresh. ttlMs<=0 = default 120 s. Main thread only (persists on change).</summary>
+        /// <summary>
+        /// Acquire or refresh. ttlMs<=0 = default 120 s on a NEW acquisition;
+        /// for the existing holder it keeps the current TTL (F-6: the write
+        /// path auto-refreshes through here, and rolling a 900 s lease back to
+        /// 120 s opened a takeover window exactly during long jobs). An
+        /// explicit positive ttlMs always applies. Main thread only (persists
+        /// on change).
+        /// </summary>
         public static bool TryAcquire(string sessionId, long ttlMs = 0)
         {
             if (string.IsNullOrEmpty(sessionId)) return false;
@@ -76,7 +83,7 @@ namespace TunaSync.UnityMCP.Editor
             bool holderDisconnected = holderNow != null && holderNow != sessionId
                 && TcpHost.Current != null
                 && !TcpHost.Current.HasLiveSession(holderNow);
-            long ttlTicks = ClampTtlTicks(ttlMs);
+            long requestedTtlTicks = ClampTtlTicks(ttlMs);
             lock (_gate)
             {
                 long now = DateTime.UtcNow.Ticks;
@@ -85,6 +92,9 @@ namespace TunaSync.UnityMCP.Editor
                 if (free || _holder == sessionId)
                 {
                     changed = _holder != sessionId;
+                    // F-6: implicit refresh (no explicit ttl) by the same
+                    // holder must not overwrite a custom TTL with the default.
+                    long ttlTicks = (ttlMs <= 0 && !changed) ? _holderTtlTicks : requestedTtlTicks;
                     _holder = sessionId;
                     _holderTtlTicks = ttlTicks;
                     _expiresUtcTicks = now + ttlTicks;

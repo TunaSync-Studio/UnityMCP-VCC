@@ -10,6 +10,7 @@ import {
   cleanDerivedLibrary,
   editorOpenOn,
   findUnityPidByProject,
+  pickUnityEditorPid,
   projectEditorVersion,
   readEditorRegistry,
   resolveUnityExe,
@@ -166,6 +167,51 @@ describe("UnityLockfile stage (F-1, 2.6.1)", () => {
 
   it("OS scan returns undefined for a project no Unity process has open", () => {
     expect(findUnityPidByProject("Z:/no/such/unitymcp-f1-project")).toBeUndefined();
+  });
+});
+
+describe("OS-scan editor pick (F-7, 2.6.3)", () => {
+  // Shape observed in the field: the editor plus two AssetImportWorkers,
+  // all Unity.exe, all with the same -projectPath (slash style varies).
+  const FIELD = [
+    { pid: 91_748, cmd: '"C:\\U\\Unity.exe"  -projectPath "C:\\Projects\\Avatar Project"' },
+    {
+      pid: 69_912,
+      cmd: '"C:\\U\\Unity.exe" -adb2 -batchMode -name AssetImportWorker0 -projectPath "C:/Projects/Avatar Project"',
+    },
+    {
+      pid: 90_632,
+      cmd: '"C:\\U\\Unity.exe" -adb2 -batchMode -name AssetImportWorker1 -projectPath "C:/Projects/Avatar Project"',
+    },
+  ];
+
+  it("picks the interactive editor, never an AssetImportWorker", () => {
+    expect(pickUnityEditorPid(FIELD, "C:\\Projects\\Avatar Project")).toBe(91_748);
+    expect(pickUnityEditorPid(FIELD, "C:/Projects/Avatar Project")).toBe(91_748);
+  });
+
+  it("does not match a path-prefix sibling project", () => {
+    const lines = [
+      { pid: 11, cmd: 'Unity.exe -projectPath "C:\\proj\\avatar_v01_jacket"' },
+      { pid: 22, cmd: 'Unity.exe -projectPath "C:\\proj\\avatar_v01"' },
+    ];
+    expect(pickUnityEditorPid(lines, "C:/proj/avatar_v01")).toBe(22);
+    expect(
+      pickUnityEditorPid([lines[0] as { pid: number; cmd: string }], "C:/proj/avatar_v01"),
+    ).toBeUndefined();
+  });
+
+  it("returns nothing when several interactive editors match (ambiguous)", () => {
+    const lines = [
+      { pid: 1, cmd: 'Unity.exe -projectPath "C:\\proj\\a"' },
+      { pid: 2, cmd: 'Unity.exe -projectPath "C:\\proj\\a"' },
+    ];
+    expect(pickUnityEditorPid(lines, "C:/proj/a")).toBeUndefined();
+  });
+
+  it("handles unquoted -projectPath values", () => {
+    const lines = [{ pid: 7, cmd: "Unity.exe -projectPath C:/proj/nospace -other x" }];
+    expect(pickUnityEditorPid(lines, "C:\\proj\\nospace")).toBe(7);
   });
 });
 

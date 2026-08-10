@@ -133,6 +133,11 @@ via user32 off the main thread). `kind` (2.6.1) is `"progress"` (a
 `(busy for MM:SS)` counter in the title or an `msctls_progress32` child —
 clears itself; do NOT press Cancel, that aborts the operation) or
 `"decision"` (a human must dismiss it; retrying alone will not clear it).
+When the server's discovery layer detects a stale heartbeat it probes the
+blocked editor live before answering (2.6.3, F-5): the merged detail then
+also carries `candidates`, `heartbeatAgeMs` and `probedLive: true`. Lease
+note (2.6.3, F-6): a write-path auto-refresh keeps the TTL from acquire;
+only an explicit `ttl_s` changes it.
 
 `PLAY_MODE_ACTIVE`: `eval.run` refuses while the editor is in play mode
 unless `allowPlayMode:true` — play-mode scene edits revert on exit while

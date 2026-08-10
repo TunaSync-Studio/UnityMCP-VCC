@@ -397,47 +397,87 @@ export function unityLockfilePresent(projectPath: string): boolean {
   }
 }
 
+export interface OsProcessLine {
+  pid: number;
+  cmd: string;
+}
+
 /**
- * OS-level fallback: pid of a running Unity editor whose command line contains
- * this project path. Covers editors the registry cannot see - Safe Mode or a
- * failed plugin compile, exactly the states quit/cleanup exist for.
+ * F-7: pick THE interactive editor for a project from raw process lines.
+ * - AssetImportWorkers run as Unity.exe with the SAME -projectPath (plus
+ *   -batchMode -name AssetImportWorkerN); quitting one reports fake success
+ *   and force-killing one mid-import is the exact Library corruption this
+ *   fallback warns about. Batch processes are never the interactive editor.
+ * - The -projectPath VALUE is extracted and compared with samePath() -
+ *   substring matching grabbed `milfy_neo01_jacket` when asked for
+ *   `milfy_neo01` (three such prefix pairs existed on the field machine).
+ * - More than one surviving candidate = ambiguity; return nothing rather
+ *   than quit/kill a coin-flip pick.
+ */
+export function pickUnityEditorPid(
+  lines: readonly OsProcessLine[],
+  projectPath: string,
+): number | undefined {
+  const hits: number[] = [];
+  for (const { pid, cmd } of lines) {
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    const lower = cmd.toLowerCase();
+    if (lower.includes("-batchmode") || lower.includes("assetimportworker")) continue;
+    const m = /-projectpath\s+(?:"([^"]*)"|([^\s"]+))/i.exec(cmd);
+    const value = m?.[1] ?? m?.[2];
+    if (value === undefined || value.length === 0) continue;
+    if (samePath(value, projectPath)) hits.push(pid);
+  }
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/** Raw OS process list (Unity-related only), platform-specific. */
+function listUnityProcesses(): OsProcessLine[] {
+  if (process.platform === "win32") {
+    const r = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name='Unity.exe'\" | " +
+          'ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
+      ],
+      { encoding: "utf8", timeout: 15_000, windowsHide: true },
+    );
+    if (r.status !== 0 || !r.stdout) return [];
+    const out: OsProcessLine[] = [];
+    for (const line of r.stdout.split(/\r?\n/)) {
+      const tab = line.indexOf("\t");
+      if (tab <= 0) continue;
+      const pid = Number.parseInt(line.slice(0, tab).trim(), 10);
+      if (Number.isFinite(pid)) out.push({ pid, cmd: line.slice(tab + 1) });
+    }
+    return out;
+  }
+  const r = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 15_000 });
+  if (r.status !== 0 || !r.stdout) return [];
+  const out: OsProcessLine[] = [];
+  for (const line of r.stdout.split("\n")) {
+    const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+    const pidText = m?.[1];
+    const cmdText = m?.[2];
+    if (pidText === undefined || cmdText === undefined) continue;
+    if (!cmdText.toLowerCase().includes("unity")) continue;
+    out.push({ pid: Number.parseInt(pidText, 10), cmd: cmdText });
+  }
+  return out;
+}
+
+/**
+ * OS-level fallback: pid of THE running interactive Unity editor whose
+ * -projectPath equals this project (exact samePath match; batch/import-worker
+ * processes excluded - F-7). Covers editors the registry cannot see - Safe
+ * Mode or a failed plugin compile, exactly the states quit/cleanup exist for.
  */
 export function findUnityPidByProject(projectPath: string): number | undefined {
-  const want = projectPath.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
   try {
-    if (process.platform === "win32") {
-      const r = spawnSync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-Command",
-          "Get-CimInstance Win32_Process -Filter \"Name='Unity.exe'\" | " +
-            'ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
-        ],
-        { encoding: "utf8", timeout: 15_000, windowsHide: true },
-      );
-      if (r.status !== 0 || !r.stdout) return undefined;
-      for (const line of r.stdout.split(/\r?\n/)) {
-        const tab = line.indexOf("\t");
-        if (tab <= 0) continue;
-        const pid = Number.parseInt(line.slice(0, tab).trim(), 10);
-        const cmd = line.slice(tab + 1).replaceAll("\\", "/").toLowerCase();
-        if (Number.isFinite(pid) && pid > 0 && cmd.includes(want)) return pid;
-      }
-      return undefined;
-    }
-    const r = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 15_000 });
-    if (r.status !== 0 || !r.stdout) return undefined;
-    for (const line of r.stdout.split("\n")) {
-      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
-      const pidText = m?.[1];
-      const cmdText = m?.[2];
-      if (pidText === undefined || cmdText === undefined) continue;
-      const cmd = cmdText.replaceAll("\\", "/").toLowerCase();
-      if (cmd.includes("unity") && cmd.includes(want)) return Number.parseInt(pidText, 10);
-    }
-    return undefined;
+    return pickUnityEditorPid(listUnityProcesses(), projectPath);
   } catch {
     return undefined;
   }

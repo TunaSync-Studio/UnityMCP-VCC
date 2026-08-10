@@ -6,6 +6,40 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.3] - 2026-08-10
+
+Unity plugin + npm server release: three findings from the second field
+pass (`BUSY_MODAL` short-circuit hunt on a live avatar project).
+
+### Fixed
+- **OS process scan can no longer grab the wrong Unity.exe** (F-7): the
+  quit/cleanup fallback introduced in 2.6.1 matched command lines by
+  substring, so AssetImportWorkers (same exe, same `-projectPath`,
+  spawned exactly when imports are churning) and path-prefix sibling
+  projects (`milfy_neo01` vs `milfy_neo01_jacket`) could be picked —
+  quitting a worker reported fake success; force-killing one mid-import
+  is the Library-corruption case the tool itself warns about. The scan
+  now extracts the `-projectPath` value and requires an exact normalized
+  match, excludes `-batchMode`/`AssetImportWorker` processes, and
+  returns nothing when more than one candidate survives.
+- **Long blocks no longer lose the modal name** (F-5): once the registry
+  heartbeat aged past the stale threshold, the server answered from its
+  own short-circuit without asking the plugin — so `BUSY_MODAL` carried
+  a named dialog for short stalls but only "blocked main thread -
+  modal dialog, long import, sleep" for long ones, the exact case the
+  feature exists for. The server now probes the blocked editor live
+  (hello and the watchdog answer run on the plugin's transport thread,
+  main thread not required) and grafts `detail.modal` onto the
+  unresponsive answer, keeping the candidates/heartbeat diagnostics.
+- **Write operations no longer shrink a custom lease TTL** (F-6): the
+  write path auto-refreshes the lease with no explicit ttl, and that
+  refresh overwrote a `ttl_s: 900` acquire back to the 120 s default —
+  opening a takeover window mid-job. An implicit same-holder refresh
+  now keeps the acquired TTL; an explicit `ttl_s` still applies.
+- `vpm_manage` with `clean_library:false` now answers
+  `libraryClean: {skipped, reason}` instead of silently omitting the
+  key, so a skipped clean is distinguishable from a forgotten one.
+
 ## [2.6.2] - 2026-08-10
 
 Server-only npm republish. The `tunasync-unity-mcp@2.6.1` npm artifact

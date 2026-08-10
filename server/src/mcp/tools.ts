@@ -14,6 +14,7 @@ import type { RecipeLibrary } from "../recipes.js";
 import type { UnityClient } from "../unity/client.js";
 import type { ProjectPool } from "../unity/pool.js";
 import { makeProgressBridge, type ProgressBridge, type ToolExtra } from "./progress.js";
+import { enrichBusyModal } from "../unity/blockedProbe.js";
 import { armRequiredResult, checkArm, consumeArm } from "../armGate.js";
 import { serverIdentity } from "../version.js";
 import {
@@ -68,8 +69,19 @@ function okText(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
 }
 
-function fail(err: unknown): CallToolResult {
-  const obj = toUnityMcpError(err).obj;
+// F-5: discovery's F-12 short-circuit needs the active config to probe the
+// blocked editor; set once at registration (single funnel = fail()).
+let enrichCfgRef: Config | null = null;
+
+async function fail(err: unknown): Promise<CallToolResult> {
+  let obj = toUnityMcpError(err).obj;
+  try {
+    // F-5: an F-12 "unresponsive" BUSY_MODAL carries no modal name - ask the
+    // blocked editor live (transport thread answers while main is stuck).
+    obj = await enrichBusyModal(enrichCfgRef, obj);
+  } catch {
+    // Enrichment is best-effort; the original error always ships.
+  }
   // F-13 completion: the moment you most need to know WHICH server answered
   // is when it answers with an error (BUSY_MODAL during a stale-build hunt),
   // so every error carries the server identity, not just health responses.
@@ -436,7 +448,7 @@ function tool<S extends z.ZodRawShape>(
       try {
         return maskResult(await handler(args, ctx, wrappedExtra), stream);
       } catch (err) {
-        return maskResult(fail(err), stream);
+        return maskResult(await fail(err), stream);
       }
     };
     // SDK glue: ToolCallback<S> is a conditional type that stays deferred for
@@ -1330,10 +1342,15 @@ const toolTable: readonly ToolRegistrar[] = [
       }
       if (
         spec.write &&
-        args.clean_library !== false &&
         args.project !== undefined &&
         ["add", "remove", "resolve", "upgrade"].includes(args.action)
       ) {
+        if (args.clean_library === false) {
+          // nit (2.6.3): say WHY nothing was cleaned - a silently absent key
+          // left no trace of whether the skip was requested or a bug.
+          body.libraryClean = { skipped: true, reason: "clean_library:false requested" };
+          return ok(body);
+        }
         // P1-2: stale Bee/ScriptAssemblies after a package change put the
         // NEXT editor start into Safe Mode ("Unable to resolve reference").
         // Derived caches only, and never under a live editor.
@@ -1654,5 +1671,6 @@ const toolTable: readonly ToolRegistrar[] = [
 ];
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {
+  enrichCfgRef = ctx.cfg;
   for (const register of toolTable) register(server, ctx);
 }
