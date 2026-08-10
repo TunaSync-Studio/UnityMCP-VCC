@@ -65,7 +65,21 @@ describe("blocked-editor probe over real TCP (F-8)", () => {
     expect(detail.lastTickAgoMs).toBe(200_000);
     expect(detail.heartbeatAgeMs).toBe(193_000);
     expect(detail.probedLive).toBe(true);
+    // nit: only candidates[0] is probed - name the editor that answered so a
+    // multi-candidate error cannot be read as "this is your project's dialog".
+    expect(detail.probedPid).toBe(process.pid);
     expect(mock.received.reqs.map((r) => r.method)).toEqual(["sys.modal"]);
+  });
+
+  it("says which candidate answered when there is more than one", async () => {
+    const { cfg } = await startMock({
+      "sys.modal": () => ({ pid: process.pid, lastTickAgoMs: 200_000, modal: MODAL, modalCount: 1 }),
+    });
+    const err = f12Error(process.pid);
+    (err.detail as { candidates: unknown[] }).candidates.push({ pid: 999_999_991, projectPath: "C:/Other" });
+    const detail = (await enrichBusyModal(cfg, err)).detail as Record<string, unknown>;
+    expect(detail.probedPid).toBe(process.pid);
+    expect(detail.probedCandidates).toBe("1 of 2 (first)");
   });
 
   it("falls back to sys.echo -> watchdog BUSY_MODAL on a pre-2.6.4 plugin", async () => {

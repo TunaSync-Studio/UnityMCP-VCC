@@ -431,6 +431,89 @@ export function pickUnityEditorPid(
   return hits.length === 1 ? hits[0] : undefined;
 }
 
+export interface NativeDialog {
+  title: string;
+  buttons: string[];
+  text?: string;
+}
+
+// F-15: BUSY_MODAL can only name a dialog once the PLUGIN is loaded. A modal
+// that blocks Unity *during startup* - the New Input System backend prompt on
+// a world project, a Safe Mode question, an upgrade confirm - therefore hits
+// the one window where nothing can name it: launch waits for a bridge that
+// will never register and times out with a guess ("a consent dialog, Safe Mode
+// prompt or long import may be in the way"). The server can see it from the OS
+// side, so it should say which. Detection only - never presses a button.
+const DIALOG_PROBE_PS = `
+Add-Type @"
+using System; using System.Text; using System.Runtime.InteropServices;
+public class McpDlg {
+  public delegate bool E(IntPtr h, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool EnumWindows(E cb, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool EnumChildWindows(IntPtr p, E cb, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, StringBuilder l, uint f, uint t, out IntPtr r);
+  public static string C(IntPtr h){ var sb=new StringBuilder(256); GetClassNameW(h,sb,256); return sb.ToString(); }
+  public static string T(IntPtr h){ var sb=new StringBuilder(512); GetWindowTextW(h,sb,512); return sb.ToString(); }
+  public static string Body(IntPtr h){ var sb=new StringBuilder(4096); IntPtr r; SendMessageTimeoutW(h, 13, (IntPtr)4096, sb, 2, 2000, out r); return sb.ToString(); }
+}
+"@
+$target = __PID__
+$out = New-Object System.Collections.ArrayList
+$null = [McpDlg]::EnumWindows({ param($h,$l)
+  $p = 0; [void][McpDlg]::GetWindowThreadProcessId($h, [ref]$p)
+  if ($p -ne $target) { return $true }
+  if (-not [McpDlg]::IsWindowVisible($h)) { return $true }
+  if ([McpDlg]::C($h) -ne '#32770') { return $true }
+  $btns = New-Object System.Collections.ArrayList
+  $body = ''
+  $null = [McpDlg]::EnumChildWindows($h, { param($c,$m)
+    $cls = [McpDlg]::C($c)
+    if ($cls -match 'Button') { $null = $btns.Add((([McpDlg]::T($c)) -replace '&','')) }
+    elseif ($cls -match 'Edit|Static') { $t = [McpDlg]::Body($c); if ($t.Length -gt $body.Length) { $script:body = $t } }
+    return $true }, [IntPtr]::Zero)
+  $null = $out.Add([pscustomobject]@{ title = [McpDlg]::T($h); buttons = @($btns); text = $body })
+  return $true }, [IntPtr]::Zero)
+ConvertTo-Json @($out) -Depth 4 -Compress
+`;
+
+/**
+ * Visible standard dialogs owned by a pid, read from the OS (no plugin
+ * needed). Empty on any failure or on non-Windows - a diagnostic must never
+ * break the path it decorates.
+ */
+export function describeNativeDialogs(pid: number): NativeDialog[] {
+  if (process.platform !== "win32") return [];
+  try {
+    const r = spawnSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", DIALOG_PROBE_PS.replace("__PID__", String(pid))],
+      { encoding: "utf8", timeout: 20_000, windowsHide: true },
+    );
+    if (r.status !== 0 || !r.stdout) return [];
+    const parsed: unknown = JSON.parse(r.stdout.trim().replace(/^﻿/, ""));
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    const out: NativeDialog[] = [];
+    for (const d of arr) {
+      if (typeof d !== "object" || d === null) continue;
+      const o = d as { title?: unknown; buttons?: unknown; text?: unknown };
+      if (typeof o.title !== "string" || o.title.length === 0) continue;
+      const body = typeof o.text === "string" ? o.text.trim() : "";
+      out.push({
+        title: o.title,
+        buttons: Array.isArray(o.buttons) ? o.buttons.filter((b): b is string => typeof b === "string") : [],
+        ...(body.length > 0 ? { text: body.slice(0, 1000) } : {}),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /** Raw OS process list (Unity-related only), platform-specific. */
 function listUnityProcesses(): OsProcessLine[] {
   if (process.platform === "win32") {

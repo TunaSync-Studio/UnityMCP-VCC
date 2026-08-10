@@ -226,6 +226,13 @@ export async function enrichBusyModal(
       modalCount: answer.modalCount,
       ...(answer.lastTickAgoMs !== undefined ? { lastTickAgoMs: answer.lastTickAgoMs } : {}),
       probedLive: true,
+      // Only the first candidate is probed. Say WHICH editor answered, so a
+      // multi-candidate error cannot be misread as "this dialog belongs to
+      // whichever project you had in mind".
+      probedPid: pid,
+      ...(Array.isArray(detail.candidates) && detail.candidates.length > 1
+        ? { probedCandidates: `1 of ${detail.candidates.length} (first)` }
+        : {}),
     },
   };
 }

@@ -6,6 +6,33 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-08-11
+
+npm server + Unity package.
+
+### Fixed
+- **`unity_editor launch` names the dialog that is blocking startup** (F-15):
+  `BUSY_MODAL` can only name a dialog once the plugin has loaded, so a modal
+  that blocks Unity *during startup* — the New Input System backend prompt a
+  world project raises, a Safe Mode question, the plugin's own consent
+  dialog — landed in the one window where nothing could name it, and launch
+  timed out with a guess ("a consent dialog, Safe Mode prompt or long import
+  may be in the way"). The server now reads the blocking dialogs from the OS
+  (user32, detection only, never presses) and returns
+  `blockingDialogs: [{title, buttons, text}]` plus a hint that says which one
+  to answer; when there is none it says so, so a long import is no longer
+  confused with an unanswered prompt.
+- `enrichBusyModal` reports `probedPid` (and `probedCandidates` when there was
+  more than one candidate), so a named dialog cannot be attributed to the
+  wrong editor.
+- `sys.modal` returns every visible dialog as `modals`, not just the first —
+  stacked dialogs used to be reported only as a count.
+- `asset_import` echoes `packagePath` (what the caller passed; `package` is
+  Unity's extension-less callback value) and explains `assetCount: 0` instead
+  of leaving "already up to date" indistinguishable from "empty or failed".
+  The `assets[]` note now says the list is everything Unity imported during
+  the window, not a manifest of the package.
+
 ## [2.6.5] - 2026-08-10
 
 Unity package only; the npm server is unchanged (stays 2.6.4).

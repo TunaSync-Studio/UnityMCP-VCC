@@ -25,6 +25,7 @@ import {
   createProject,
   defaultRunner,
   editorOpenOn,
+  describeNativeDialogs,
   findUnityPidByProject,
   findVrcGet,
   killProcess,
@@ -1533,9 +1534,23 @@ const toolTable: readonly ToolRegistrar[] = [
           }
           body.ready = ready;
           if (!ready) {
-            body.hint =
-              "editor process started but the bridge has not registered yet - a consent dialog, " +
-              "Safe Mode prompt or long import may be in the way; unity_health_check / BUSY_MODAL will say which";
+            // F-15: BUSY_MODAL needs the plugin, and the plugin is exactly what
+            // has not loaded yet - so ask the OS which dialog is holding it.
+            const dialogs = describeNativeDialogs(spawned.pid);
+            if (dialogs.length > 0) {
+              body.blockingDialogs = dialogs;
+              const d = dialogs[0];
+              body.hint =
+                `editor startup is blocked by a dialog: "${d?.title ?? ""}"` +
+                (d?.buttons.length ? ` [${d.buttons.join(", ")}]` : "") +
+                " - a human must answer it in the editor UI; the MCP bridge cannot register until then" +
+                (dialogs.length > 1 ? ` (+${dialogs.length - 1} more dialog(s))` : "");
+            } else {
+              body.hint =
+                "editor process started but the bridge has not registered yet - no native dialog is " +
+                "up, so this is a long import/compile or a hung editor; unity_health_check will say " +
+                "more once the plugin registers";
+            }
           }
         }
         return ok(body);

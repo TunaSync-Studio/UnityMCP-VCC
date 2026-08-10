@@ -150,6 +150,10 @@ namespace TunaSync.UnityMCP.Editor
                     lastTickAgoMs = MainThreadPump.LastTickAgoMs,
                     modal = probed != null ? probed[0] : null,
                     modalCount = probed != null ? probed.Count : 0,
+                    // `modal` is the first one for compatibility; stacked
+                    // dialogs (a confirm on top of a progress bar) used to be
+                    // reported only as a count, which named the wrong one.
+                    modals = probed,
                 }));
                 return;
             }

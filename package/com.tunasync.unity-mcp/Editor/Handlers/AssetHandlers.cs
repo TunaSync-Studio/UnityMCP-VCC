@@ -58,8 +58,19 @@ namespace TunaSync.UnityMCP.Editor
                 {
                     imported = true,
                     package = packageName,
+                    // `package` is Unity's callback value (name without the
+                    // extension); echo what the caller actually passed so the
+                    // answer can be matched to the request.
+                    packagePath = full,
                     assetCount = assets.Count,
                     assets,
+                    // Two ways this list misleads, both named rather than fixed:
+                    // 0 read identically to "empty package" / "failed", and the
+                    // collector is a global AssetPostprocessor - anything Unity
+                    // imported during the window lands here, package or not.
+                    note = assets.Count == 0
+                        ? "no assets were imported or changed: the package content already matches the project (Unity skips identical assets). This is success, not an empty or failed package."
+                        : "assets[] lists everything Unity imported while this package was importing - a busy editor can add unrelated entries (e.g. ProjectSettings after a domain reload); it is not a manifest of the package.",
                 });
             };
             failed = (packageName, error) =>
