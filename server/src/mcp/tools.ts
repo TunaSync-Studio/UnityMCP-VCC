@@ -14,7 +14,7 @@ import type { RecipeLibrary } from "../recipes.js";
 import type { UnityClient } from "../unity/client.js";
 import type { ProjectPool } from "../unity/pool.js";
 import { makeProgressBridge, type ProgressBridge, type ToolExtra } from "./progress.js";
-import { enrichBusyModal } from "../unity/blockedProbe.js";
+import { enrichBusyModal, probeBlockedEditor } from "../unity/blockedProbe.js";
 import { armRequiredResult, checkArm, consumeArm } from "../armGate.js";
 import { serverIdentity } from "../version.js";
 import {
@@ -558,6 +558,26 @@ const toolTable: readonly ToolRegistrar[] = [
       }));
       if (registry.filter((r) => r.alive).length === 0) {
         const unresponsive = registry.filter((r) => r.reason === "unresponsive").length;
+        // F-9: health is the FIRST tool the instructions send people to, so
+        // it must name the blocking dialog too - probe the blocked editor
+        // live (transport thread answers while main is stuck).
+        let probed: Record<string, unknown> = {};
+        const blockedEntry = ctx.pool
+          .listRegistry()
+          .find((d) => d.reason === "unresponsive")?.entry;
+        if (blockedEntry !== undefined) {
+          const answer = await probeBlockedEditor(blockedEntry);
+          if (answer !== null) {
+            probed = {
+              modal: answer.modal,
+              modalCount: answer.modalCount,
+              ...(answer.lastTickAgoMs !== undefined
+                ? { lastTickAgoMs: answer.lastTickAgoMs }
+                : {}),
+              probedLive: true,
+            };
+          }
+        }
         // Vocabulary alignment with the resolve path (F-12 follow-up): an
         // editor that exists but is blocked reports status "unresponsive",
         // "no_unity" is reserved for genuinely absent editors.
@@ -569,8 +589,14 @@ const toolTable: readonly ToolRegistrar[] = [
               ? `no responsive Unity Editor: ${unresponsive} registry entry/entries have a live pid ` +
                 "but a stalled heartbeat (blocked main thread - modal dialog, long import, sleep - " +
                 "or a hung editor). The process is likely still listening on its port; retry once " +
-                "the editor unblocks."
+                "the editor unblocks." +
+                (typeof probed.modalCount === "number"
+                  ? probed.modalCount > 0
+                    ? " A native dialog is up - see `modal`."
+                    : " Live probe: no native dialog is up (long import/compile, not an unclicked dialog)."
+                  : "")
               : "no running Unity Editor with the UnityMCP plugin was discovered",
+          ...probed,
           registryDir: ctx.cfg.registryDir,
           registry,
         });
@@ -580,7 +606,9 @@ const toolTable: readonly ToolRegistrar[] = [
       try {
         resolved = ctx.pool.resolve(args.project);
       } catch (err) {
-        const obj = toUnityMcpError(err).obj;
+        // F-9: health wraps errors in ok() and so bypassed the fail() funnel
+        // where the F-12 enrichment lives - enrich here too.
+        const obj = await enrichBusyModal(ctx.cfg, toUnityMcpError(err).obj);
         const status =
           obj.code === "PROJECT_AMBIGUOUS"
             ? "ambiguous"
@@ -661,6 +689,24 @@ const toolTable: readonly ToolRegistrar[] = [
                 "thread still answers; main-thread tools will return BUSY_MODAL. " +
                 "Retry once the editor unblocks (modal dialog, long import, sleep).",
             }
+          : {}),
+        ...(frozen
+          ? await (async () => {
+              // F-9: name the blocker while we are already connected -
+              // sys.modal answers on the transport thread (2.6.4 plugin;
+              // older plugins answer METHOD_NOT_FOUND and we stay silent).
+              try {
+                const m = (await client.call("sys.modal", {}, {
+                  timeoutMs: LIGHT_CALL_TIMEOUT_MS,
+                  signal: extra.signal,
+                })) as Record<string, unknown> | null;
+                return m !== null && typeof m === "object"
+                  ? { modal: m.modal ?? null, modalCount: m.modalCount ?? 0, probedLive: true }
+                  : {};
+              } catch {
+                return {};
+              }
+            })()
           : {}),
         server: serverIdentity(),
         connectionState: client.getState(),

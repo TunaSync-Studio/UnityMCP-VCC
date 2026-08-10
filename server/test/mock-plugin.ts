@@ -34,6 +34,7 @@ export class MockPluginError extends Error {
     readonly code: string,
     message: string,
     readonly retryable = false,
+    readonly detail?: unknown,
   ) {
     super(message);
     this.name = "MockPluginError";
@@ -480,6 +481,7 @@ export class MockPlugin {
               code: err.code as ErrorObj["code"],
               message: err.message,
               retryable: err.retryable,
+              ...(err.detail !== undefined ? { detail: err.detail } : {}),
             }
           : {
               code: "HANDLER_EXCEPTION",

@@ -152,6 +152,7 @@ PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
 |---|---|
 | `sys.info` | static info (same shape as `welcome` minus v) |
 | `sys.status` | volatile snapshot: compiling, playMode, lastTickAgoMs, jobs summary, lease. Served from transport thread (no main-thread hop) |
+| `sys.modal` | (2.6.4) `{pid, lastTickAgoMs, modal?, modalCount}` — native-dialog probe (user32), served from the transport thread so it answers while the main thread is blocked. The server's blocked-editor probe uses this (fallback for older plugins: `sys.echo` → watchdog `BUSY_MODAL`) |
 | `sys.compile.status` | last compile result: `{compiling, finishedAt?, diagnostics[]}` (persisted across reload) |
 | `sys.echo` | `{...}` → same back (tests) |
 | `eval.run` | `{code, captureLogs?, run_as_job?, allowPlayMode?}` → `{result, logs[], executionMs, engine}`; refused with `PLAY_MODE_ACTIVE` in play mode unless `allowPlayMode:true` (checked again at job execution time) |

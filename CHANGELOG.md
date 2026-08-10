@@ -6,6 +6,41 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.4] - 2026-08-10
+
+Unity plugin + npm server release: the 2.6.3 full-test pass proved the
+F-5 modal probe never fired in the field and hardened the release flow.
+
+### Fixed
+- **The blocked-editor modal probe actually fires now** (F-8): 2.6.3's
+  probe asked `sys.status`, which the plugin answers on its transport
+  thread *before* the busy-watchdog — the probe always saw `ok` and the
+  enrichment silently no-opped (the regression suite had mocked the
+  probe, verifying the graft but never the acquisition). The plugin now
+  exposes `sys.modal` — a transport-thread fast path returning the
+  native-dialog probe directly (watchdog-independent) — and the server
+  probes it first, falling back to `sys.echo` (main-thread queued, so
+  the >3 s watchdog answers `BUSY_MODAL` with the modal) on pre-2.6.4
+  plugins. A live probe that finds NO dialog now says so too — "long
+  import/compile, not an unclicked dialog" is the other half of the
+  ambiguity this feature exists to remove. Regression tests now run the
+  real probe over real TCP against the scriptable mock plugin.
+- **`unity_health_check` names the blocking dialog** (F-9): health wraps
+  errors in a normal result and so bypassed the error-path enrichment —
+  the tool the docs tell people to start with was the one place the
+  dialog name never appeared. All three paths are covered now: the
+  all-editors-unresponsive answer probes the blocked editor, the
+  resolve-error answer runs the same enrichment as other tools, and a
+  frozen-but-connected editor is asked via `sys.modal` directly.
+- **`build-public-repo.mjs` can no longer gut the public tree** (F-10):
+  the wipe step included `server/node_modules` (thousands of files,
+  created by the checklist's own `npm ci` verification), which made
+  `rmSync` fail half-way on network filesystems with tracked files
+  already deleted. node_modules is now kept across regenerations, and a
+  wipe failure prints the recovery command
+  (`git -C dist/public-repo checkout -- .`) instead of leaving a
+  half-destroyed tree unexplained.
+
 ## [2.6.3] - 2026-08-10
 
 Unity plugin + npm server release: three findings from the second field

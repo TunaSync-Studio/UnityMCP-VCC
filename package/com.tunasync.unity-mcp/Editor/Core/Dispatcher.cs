@@ -135,6 +135,25 @@ namespace TunaSync.UnityMCP.Editor
                 return;
             }
 
+            // F-8 (2.6.4): sys.modal is the server's blocked-editor probe. It
+            // must ALSO answer on the transport thread - the sys.status fast
+            // path above returns before the watchdog, so a probe routed
+            // through it never saw BUSY_MODAL and the F-5 enrichment never
+            // fired in the field. Detection only: pressing buttons stays a
+            // human decision (ModalProbe is pure user32, bg-thread safe).
+            if (method == "sys.modal")
+            {
+                List<ModalProbe.ModalInfo> probed = ModalProbe.Describe();
+                session.Send(Frames.Res(env.Id, new
+                {
+                    pid = McpEditorInfo.Pid,
+                    lastTickAgoMs = MainThreadPump.LastTickAgoMs,
+                    modal = probed != null ? probed[0] : null,
+                    modalCount = probed != null ? probed.Count : 0,
+                }));
+                return;
+            }
+
             MethodReg reg;
             if (!_methods.TryGetValue(method, out reg))
             {
