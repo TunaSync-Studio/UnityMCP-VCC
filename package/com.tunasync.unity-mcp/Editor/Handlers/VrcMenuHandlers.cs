@@ -69,29 +69,35 @@ namespace TunaSync.UnityMCP.Editor
             return Field(descriptor, "expressionsMenu") as UnityEngine.Object;
         }
 
+        // F-11: puppet controls keep their parameters in `subParameters` and
+        // leave `parameter` empty. Name collection lives in MenuControlParams
+        // (outside the SDK gate) so it can be unit-tested with plain fakes.
         private static string ControlParameterName(object control)
         {
-            object prm = Field(control, "parameter");
-            string n = Field(prm, "name") as string;
-            return n != null ? n : "";
+            return MenuControlParams.MainName(control);
         }
 
         // ---- vrc.menuTree ---------------------------------------------------
 
         private static Task<object> MenuTree(JObject p, RequestContext ctx)
         {
-            Component descriptor = ResolveDescriptor(p);
-            UnityEngine.Object rootMenu = GetMenu(descriptor);
-            JObject result = new JObject
+            using (HandlerUtil.ResolvedObject scope = ResolveAvatarScope(p))
             {
-                ["avatar"] = HandlerUtil.GetHierarchyPath(descriptor.transform),
-                ["hasMenu"] = rootMenu != null,
-            };
-            if (rootMenu != null)
-            {
-                result["tree"] = BuildTree(rootMenu, new HashSet<UnityEngine.Object>());
+                Component descriptor =
+                    VrcHandlers.FirstComponentByName(scope.Instance, "VRCAvatarDescriptor");
+                UnityEngine.Object rootMenu = GetMenu(descriptor);
+                JObject result = new JObject
+                {
+                    ["avatar"] = HandlerUtil.GetHierarchyPath(descriptor.transform),
+                    ["hasMenu"] = rootMenu != null,
+                };
+                if (scope.Temporary) result["avatarAssetPath"] = scope.AssetPath;
+                if (rootMenu != null)
+                {
+                    result["tree"] = BuildTree(rootMenu, new HashSet<UnityEngine.Object>());
+                }
+                return Task.FromResult<object>(result);
             }
-            return Task.FromResult<object>(result);
         }
 
         private static JArray BuildTree(UnityEngine.Object menu, HashSet<UnityEngine.Object> seen)
@@ -111,6 +117,15 @@ namespace TunaSync.UnityMCP.Editor
                     ["type"] = typeVal != null ? typeVal.ToString() : "",
                     ["parameter"] = ControlParameterName(control),
                 };
+                // F-11: without this a RadialPuppet dumps as parameter:"" and
+                // its wiring is invisible in the tree.
+                List<string> subPrm = MenuControlParams.SubNames(control);
+                if (subPrm.Count > 0)
+                {
+                    JArray subArr = new JArray();
+                    foreach (string s in subPrm) subArr.Add(s);
+                    item["subParameters"] = subArr;
+                }
                 object value = Field(control, "value");
                 if (value != null) item["value"] = JToken.FromObject(value);
                 UnityEngine.Object sub = Field(control, "subMenu") as UnityEngine.Object;
@@ -131,7 +146,10 @@ namespace TunaSync.UnityMCP.Editor
 
         private static Task<object> MenuAudit(JObject p, RequestContext ctx)
         {
-            Component descriptor = ResolveDescriptor(p);
+            using (HandlerUtil.ResolvedObject scope = ResolveAvatarScope(p))
+            {
+            Component descriptor =
+                VrcHandlers.FirstComponentByName(scope.Instance, "VRCAvatarDescriptor");
             GameObject avatar = descriptor.gameObject;
 
             JArray declaredList;
@@ -193,7 +211,9 @@ namespace TunaSync.UnityMCP.Editor
                 ["note"] = "judged on SOURCE controllers (post-bake AAO merges false-positive); " +
                     "humanoid muscle curves (empty path) and known internal dummies excluded",
             };
+            if (scope.Temporary) result["avatarAssetPath"] = scope.AssetPath;
             return Task.FromResult<object>(result);
+            }
         }
 
         private static HashSet<string> DeclaredParameters(Component descriptor, out JArray list)
@@ -330,54 +350,67 @@ namespace TunaSync.UnityMCP.Editor
                         items, seen);
                 }
                 string prm = ControlParameterName(control);
+                // F-11: judge EVERY parameter the control drives. Puppets keep
+                // theirs in subParameters, so reading `parameter` alone made
+                // them all look parameterless and skipped all three axes.
+                List<string> names = MenuControlParams.Names(control);
                 JObject item = new JObject
                 {
                     ["menuPath"] = menuPath,
                     ["type"] = typeVal != null ? typeVal.ToString() : "",
                     ["parameter"] = prm,
                 };
-                if (string.IsNullOrEmpty(prm))
+                if (names.Count > 1 || (names.Count == 1 && names[0] != prm))
                 {
-                    item["verdict"] = sub != null ? "submenu" : "no-parameter";
+                    JArray judged = new JArray();
+                    foreach (string n in names) judged.Add(n);
+                    item["parameters"] = judged;
+                }
+                if (names.Count == 0)
+                {
+                    item["verdict"] = MenuControlParams.Verdict(sub != null, 0, true, true, 0, 0);
                     items.Add(item);
                     continue;
                 }
-                bool isDeclared = declared.Contains(prm);
-                bool consumed = animatorHas.ContainsKey(prm);
-                item["declared"] = isDeclared;
-                item["animatorHasParameter"] = consumed;
-                HashSet<string> paths;
+                bool allDeclared = true;
+                bool allConsumed = true;
+                HashSet<string> union = new HashSet<string>();
+                foreach (string n in names)
+                {
+                    if (!declared.Contains(n)) allDeclared = false;
+                    if (!animatorHas.ContainsKey(n)) allConsumed = false;
+                    HashSet<string> paths;
+                    if (paramPaths.TryGetValue(n, out paths)) union.UnionWith(paths);
+                }
+                item["declared"] = allDeclared;
+                item["animatorHasParameter"] = allConsumed;
                 int existing = 0;
                 JArray missing = new JArray();
-                bool havePaths = paramPaths.TryGetValue(prm, out paths);
-                if (havePaths)
+                foreach (string path in union)
                 {
-                    foreach (string path in paths)
-                    {
-                        if (avatarRoot.Find(path) != null) existing++;
-                        else if (missing.Count < 20) missing.Add(path);
-                    }
-                    item["targetPaths"] = paths.Count;
+                    if (avatarRoot.Find(path) != null) existing++;
+                    else if (missing.Count < 20) missing.Add(path);
+                }
+                item["targetPaths"] = union.Count;
+                if (union.Count > 0)
+                {
                     item["targetsExisting"] = existing;
-                    item["targetsMissing"] = paths.Count - existing;
+                    item["targetsMissing"] = union.Count - existing;
                     if (missing.Count > 0) item["missingSample"] = missing;
                 }
-                else
-                {
-                    item["targetPaths"] = 0;
-                }
-                string verdict;
-                if (!isDeclared) verdict = "parameter-not-declared";
-                else if (!consumed) verdict = "parameter-unused-by-animator";
-                else if (havePaths && paths.Count > 0 && existing == 0) verdict = "dead-menu-item";
-                else if (havePaths && paths.Count > 0 && existing < paths.Count) verdict = "partially-missing";
-                else verdict = "ok";
-                item["verdict"] = verdict;
+                item["verdict"] = MenuControlParams.Verdict(
+                    sub != null, names.Count, allDeclared, allConsumed, union.Count, existing);
                 items.Add(item);
             }
         }
 
-        private static Component ResolveDescriptor(JObject p)
+        /// <summary>
+        /// F-13: resolve the avatar as a disposable scope so a baked PREFAB
+        /// ASSET path (what ndmf.bake answers with) can be audited too - it is
+        /// instantiated as a throwaway copy and destroyed when the scope ends.
+        /// Always use with `using`.
+        /// </summary>
+        private static HandlerUtil.ResolvedObject ResolveAvatarScope(JObject p)
         {
             JToken avTok = p != null ? p["avatar"] : null;
             string avatarPath = avTok != null && avTok.Type != JTokenType.Null
@@ -385,24 +418,44 @@ namespace TunaSync.UnityMCP.Editor
                 : null;
             if (!string.IsNullOrEmpty(avatarPath))
             {
-                GameObject go = GameObject.Find(avatarPath);
-                Component d = go != null
-                    ? VrcHandlers.FirstComponentByName(go, "VRCAvatarDescriptor")
-                    : null;
-                if (d != null) return d;
-                throw new McpHandlerException(ErrorCodes.InvalidParams,
-                    "vrc.menu*: no VRCAvatarDescriptor at '" + avatarPath + "'");
+                HandlerUtil.ResolvedObject r = HandlerUtil.ResolveSceneOrPrefab(avatarPath);
+                if (r.Instance == null)
+                {
+                    // GameObject.Find only sees ACTIVE objects; keep it as the
+                    // last resort so previously-working callers do not regress.
+                    GameObject legacy = GameObject.Find(avatarPath);
+                    if (legacy != null) r.Instance = legacy;
+                }
+                if (r.Instance == null
+                    || VrcHandlers.FirstComponentByName(r.Instance, "VRCAvatarDescriptor") == null)
+                {
+                    r.Dispose();
+                    throw new McpHandlerException(ErrorCodes.InvalidParams,
+                        "vrc.menu*: no VRCAvatarDescriptor at '" + avatarPath +
+                        "' (scene object path or prefab asset path)");
+                }
+                return r;
             }
+            return ResolveDescriptorInScenes();
+        }
+
+        private static HandlerUtil.ResolvedObject ResolveDescriptorInScenes()
+        {
+            HandlerUtil.ResolvedObject r = new HandlerUtil.ResolvedObject();
             for (int s = 0; s < UnityEngine.SceneManagement.SceneManager.sceneCount; s++)
             {
                 UnityEngine.SceneManagement.Scene scene =
                     UnityEngine.SceneManagement.SceneManager.GetSceneAt(s);
                 if (!scene.isLoaded) continue;
                 GameObject[] roots = scene.GetRootGameObjects();
-                for (int r = 0; r < roots.Length; r++)
+                for (int i = 0; i < roots.Length; i++)
                 {
-                    Component d = VrcHandlers.FirstComponentByName(roots[r], "VRCAvatarDescriptor");
-                    if (d != null) return d;
+                    Component d = VrcHandlers.FirstComponentByName(roots[i], "VRCAvatarDescriptor");
+                    if (d != null)
+                    {
+                        r.Instance = d.gameObject;
+                        return r;
+                    }
                 }
             }
             throw new McpHandlerException(ErrorCodes.InvalidParams,

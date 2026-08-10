@@ -89,7 +89,11 @@ function copyRecipes() {
     return top !== "" && !EXCLUDED_TOP_DIRS.has(top);
   });
   fs.writeFileSync(path.join(dstRecipes, "_index.json"), JSON.stringify(filtered, null, 2), "utf8");
+  // The excluded set is configurable and had grown past the names this line
+  // used to hardcode, which made a "did everything ship?" audit come out
+  // short with no explanation. Report what was actually applied.
+  const excludedLabel = [...EXCLUDED_TOP_DIRS].map((d) => `${d}/`).concat([...EXCLUDED_FILES]).join(", ");
   console.error(
-    `[build] recipes copied to ${dstRecipes}: ${filtered.length}/${list.length} index entries (excluded: field/, _quarantine/, _report.md)`,
+    `[build] recipes copied to ${dstRecipes}: ${filtered.length}/${list.length} index entries (excluded: ${excludedLabel})`,
   );
 }

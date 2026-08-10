@@ -6,6 +6,38 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.5] - 2026-08-10
+
+Unity package only; the npm server is unchanged (stays 2.6.4).
+
+### Fixed
+- **The avatar audits accept a baked prefab, so their own advice works**
+  (F-13): `textureMegabytesAnimOnly` is 0 on an unbaked avatar and the note
+  says to "run ndmf_bake_run and audit the baked result" — but the bake
+  answers with a prefab ASSET path while `vrc_avatar_audit` / `vrc_menu`
+  resolved scene objects only, so following the note produced
+  `INVALID_PARAMS`. Both tools now take an asset path as well: the prefab
+  is instantiated as a throwaway copy (`HideFlags.DontSave`), audited, and
+  destroyed before the call returns, with `avatarAssetPath` echoed in the
+  result so it is clear what was measured. Scene resolution is tried first
+  and is unchanged. The note now says to pass `outputPrefabPath` straight
+  back.
+- **`vrc_menu` audits puppet controls instead of writing them off** (F-11):
+  Radial/TwoAxis/FourAxis puppets keep their parameters in
+  `subParameters` and leave `parameter` empty — the normal, working
+  shape. The audit read `parameter` only, so every puppet hit the
+  "no-parameter" early-out: working ones were reported as if broken, and
+  a puppet whose parameter was undeclared, unused by any animator, or
+  animating deleted transforms was never judged on any axis and could
+  not reach `deadMenuItems`. Controls are now judged on every parameter
+  they drive (worst axis wins), the judged names ship as `parameters`,
+  and `no-parameter` means genuinely nothing is wired. `vrc_menu tree`
+  gained `subParameters` for the same reason — a puppet used to dump as
+  `parameter: ""` with its wiring invisible. On the first real avatar it
+  ran against, the newly-audited puppet turned up two missing transforms.
+  Name collection lives outside the Avatars-SDK compile gate so it is
+  unit-tested with plain fakes (6 EditMode tests, no SDK required).
+
 ## [2.6.4] - 2026-08-10
 
 Unity plugin + npm server release: the 2.6.3 full-test pass proved the

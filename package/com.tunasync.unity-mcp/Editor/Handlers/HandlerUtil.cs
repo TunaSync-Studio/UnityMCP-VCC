@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -56,6 +57,75 @@ namespace TunaSync.UnityMCP.Editor
                 }
             }
             return null;
+        }
+
+        // ---- F-13: scene object OR prefab asset -----------------------------
+
+        /// <summary>
+        /// Does this look like a project asset path rather than a scene
+        /// hierarchy path? ndmf.bake answers with a prefab ASSET path
+        /// ("Assets/UnityMCP_Bakes/&lt;avatar&gt;_&lt;ts&gt;/&lt;avatar&gt;_baked.prefab"), but the
+        /// avatar/menu audits only ever resolved scene objects - so the
+        /// textureMegabytes note telling people to "audit the baked result"
+        /// could not be followed with these tools (F-13).
+        /// </summary>
+        public static bool LooksLikePrefabAssetPath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            string p = path.Replace('\\', '/').Trim();
+            if (!p.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase)) return false;
+            return p.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)
+                || p.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// An object resolved for the duration of ONE read-only handler call.
+        /// A prefab asset is instantiated (plain copy, HideFlags.DontSave so it
+        /// never reaches the saved scene) and destroyed on Dispose; a scene
+        /// object is returned as-is and never destroyed. Always use with
+        /// `using` - an audit of a baked prefab must leave nothing behind.
+        /// </summary>
+        public struct ResolvedObject : IDisposable
+        {
+            public GameObject Instance;
+            public bool Temporary;
+            public string AssetPath;
+
+            public void Dispose()
+            {
+                if (Temporary && Instance != null) UnityEngine.Object.DestroyImmediate(Instance);
+                Instance = null;
+            }
+        }
+
+        /// <summary>
+        /// Resolve a scene hierarchy path first (unchanged behaviour), then a
+        /// prefab asset path. Empty result when neither resolves.
+        /// </summary>
+        public static ResolvedObject ResolveSceneOrPrefab(string path)
+        {
+            ResolvedObject r = new ResolvedObject();
+            if (string.IsNullOrEmpty(path)) return r;
+            GameObject inScene = FindSceneObjectByPath(path);
+            if (inScene != null)
+            {
+                r.Instance = inScene;
+                return r;
+            }
+            if (!LooksLikePrefabAssetPath(path)) return r;
+            string norm = path.Replace('\\', '/').Trim();
+            GameObject asset = AssetDatabase.LoadAssetAtPath<GameObject>(norm);
+            if (asset == null) return r;
+            // Plain Instantiate, not PrefabUtility: an audit wants a throwaway
+            // copy, not a prefab instance with override tracking.
+            GameObject copy = UnityEngine.Object.Instantiate(asset);
+            if (copy == null) return r;
+            copy.name = asset.name;
+            copy.hideFlags = HideFlags.DontSave;
+            r.Instance = copy;
+            r.Temporary = true;
+            r.AssetPath = norm;
+            return r;
         }
 
         /// <summary>All loaded-scene root objects (every loaded scene).</summary>

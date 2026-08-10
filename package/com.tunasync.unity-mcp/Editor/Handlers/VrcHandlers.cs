@@ -39,12 +39,20 @@ namespace TunaSync.UnityMCP.Editor
         private static Task<object> AvatarAudit(JObject p, RequestContext ctx)
         {
             string avatarPath = ReadString(p, "avatar");
-            GameObject avatar = ResolveAvatar(avatarPath);
+            // F-13: a baked avatar is a PREFAB ASSET, and the textureMegabytes
+            // note tells people to audit it - so an asset path has to resolve
+            // here too. ResolveSceneOrPrefab instantiates a throwaway copy and
+            // the using-block destroys it, leaving the scene untouched.
+            using (HandlerUtil.ResolvedObject resolved = ResolveAvatar(avatarPath))
+            {
+            GameObject avatar = resolved.Instance;
             if (avatar == null)
             {
                 throw new McpHandlerException(ErrorCodes.InvalidParams,
                     "vrc.avatarAudit: no avatar found (no VRCAvatarDescriptor in loaded scenes" +
-                    (avatarPath != null ? ", and no object at '" + avatarPath + "'" : "") + ")");
+                    (avatarPath != null
+                        ? ", and no scene object or prefab asset at '" + avatarPath + "'"
+                        : "") + ")");
             }
             Component descriptor = FirstComponentByName(avatar, "VRCAvatarDescriptor");
             if (descriptor == null)
@@ -58,6 +66,7 @@ namespace TunaSync.UnityMCP.Editor
 
             JObject result = new JObject();
             result["avatar"] = HandlerUtil.GetHierarchyPath(avatar.transform);
+            if (resolved.Temporary) result["avatarAssetPath"] = resolved.AssetPath;
             JObject byCheck = new JObject();
             result["checks"] = byCheck;
 
@@ -86,6 +95,7 @@ namespace TunaSync.UnityMCP.Editor
                 }
             }
             return Task.FromResult<object>(result);
+            }
         }
 
         private static JToken CheckPerformance(GameObject avatar, Component descriptor)
@@ -188,7 +198,9 @@ namespace TunaSync.UnityMCP.Editor
                     "through animation object-reference curves (e.g. Modular Avatar material " +
                     "swaps), runtime-size estimate. NOTE: on an UNBAKED avatar this is always 0 " +
                     "- Modular Avatar material swaps become animation curves only during the " +
-                    "NDMF build. Run ndmf_bake_run and audit the baked result for the true figure";
+                    "NDMF build. Run ndmf_bake_run and audit the baked result for the true " +
+                    "figure: pass its outputPrefabPath straight back as 'avatar' (a prefab asset " +
+                    "path is instantiated for the audit and discarded afterwards)";
             }
             catch (Exception ex)
             {
@@ -379,19 +391,25 @@ namespace TunaSync.UnityMCP.Editor
             };
         }
 
-        private static GameObject ResolveAvatar(string avatarPath)
+        private static HandlerUtil.ResolvedObject ResolveAvatar(string avatarPath)
         {
+            // F-13: scene path first (unchanged), then prefab asset path.
             if (!string.IsNullOrEmpty(avatarPath))
             {
-                return HandlerUtil.FindSceneObjectByPath(avatarPath);
+                return HandlerUtil.ResolveSceneOrPrefab(avatarPath);
             }
+            HandlerUtil.ResolvedObject r = new HandlerUtil.ResolvedObject();
             List<GameObject> roots = HandlerUtil.GetAllSceneRoots();
             for (int i = 0; i < roots.Count; i++)
             {
                 List<Component> found = HandlerUtil.ComponentsByTypeName(roots[i], "VRCAvatarDescriptor");
-                if (found.Count > 0) return found[0].gameObject;
+                if (found.Count > 0)
+                {
+                    r.Instance = found[0].gameObject;
+                    return r;
+                }
             }
-            return null;
+            return r;
         }
 #endif // MCP_VRCSDK3_AVATARS
 
