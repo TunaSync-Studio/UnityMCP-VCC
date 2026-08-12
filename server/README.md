@@ -27,7 +27,8 @@ It survives domain reloads and editor restarts transparently.
   `tools/arm-vrc-upload.bat` in the repo). Both `dry_run` and the real
   publish path are live-verified (2026-08-06).
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks
-  `execute_editor_command` / `ndmf_bake_run` / `vrc_upload` /
+  `execute_editor_command` / `ndmf_bake_run` / `vrc_upload` / `vpm_manage` /
+  `unity_editor` / `asset_import` / `vcc_project` /
   `session_lease{takeover}` and masks `X:\Users\<name>` path segments (plus
   `UNITY_MCP_STREAM_MASK` terms) in all output — for screen-shared sessions.
 
@@ -96,11 +97,14 @@ long NDMF/upload waits, set `tool_timeout_sec = 1300` in the server's
 
 `unity_health_check`, `execute_editor_command`, `get_editor_state`,
 `scene_query`, `camera_capture`, `get_logs`, `find_recipe`, `ndmf_bake_run`,
-`vrc_upload`, `vrc_avatar_audit`, `session_lease`, `job_status`, `job_cancel`,
-plus two that need no running editor: `vcc_project` (read the VCC project
-list / one project's locked VPM packages) and `vpm_manage` (vrc-get wrapper:
-add / remove / resolve / outdated / repos, and `create` — bootstrap a new
-project from a VCC template before Unity ever starts).
+`vrc_upload`, `vrc_avatar_audit`, `vrc_menu` (menu tree + dead-item audit),
+`asset_import` (non-interactive .unitypackage), `session_lease`,
+`job_status`, `job_cancel`, plus three that need no running editor:
+`vcc_project` (read the VCC project list / one project's locked VPM
+packages), `vpm_manage` (vrc-get wrapper: add / remove / resolve / upgrade /
+outdated / repos, and `create` — bootstrap a new project from a VCC template
+before Unity ever starts) and `unity_editor` (launch / quit / status for the
+editor process itself).
 
 Recipes are also exposed as MCP resources under `recipe://<category>/<name>`.
 

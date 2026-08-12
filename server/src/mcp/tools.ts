@@ -28,6 +28,7 @@ import {
   describeNativeDialogs,
   findUnityPidByProject,
   findVrcGet,
+  isUnityPid,
   killProcess,
   launchUnity,
   listProjects,
@@ -1593,6 +1594,19 @@ const toolTable: readonly ToolRegistrar[] = [
                 "editor this scan cannot see. Nothing was quit.",
             });
           }
+        }
+        if (pidSource === "registry" && !isUnityPid(pid)) {
+          // M-3 (kimi audit): stale registry entry + OS pid reuse could point
+          // taskkill at an innocent process. os-scan pids are Unity-only by
+          // construction; registry pids get verified here.
+          return ok({
+            closed: false,
+            running: false,
+            note:
+              `registry pid ${pid} is not a Unity.exe process (stale entry after a crash + ` +
+              "pid reuse?) - nothing was killed. The dead-entry sweep clears this on the " +
+              "next editor start.",
+          });
         }
         const graceful = closeProcessGracefully(pid);
         const deadline = Date.now() + (args.timeout_ms ?? 15_000);

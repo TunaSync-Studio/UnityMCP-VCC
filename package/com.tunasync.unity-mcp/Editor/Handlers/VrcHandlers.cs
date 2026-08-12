@@ -581,7 +581,49 @@ namespace TunaSync.UnityMCP.Editor
                     "(or use dryRun:true to validate without publishing)");
             }
 
+            // M-1 (2026-08-12 audit): the human arm gate lived only in the npm
+            // server, so a client holding the registry token could drive the
+            // plugin directly and skip it. The plugin now READS the arm file
+            // (existence + TTL) as defense in depth; CONSUMING it stays
+            // server-side - a double delete would race the very server the
+            // file exists to satisfy.
+            ThrowIfNotArmed();
+
             return await RealUpload(ctx, target, content, objectName, blueprintId, thumbnailPath);
+        }
+
+        /// <summary>
+        /// Mirror of the server's armGate semantics (same file, same env
+        /// overrides, same TTL default) - read-only check, never consumes.
+        /// </summary>
+        private static void ThrowIfNotArmed()
+        {
+            string file = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_FILE");
+            if (string.IsNullOrEmpty(file)) file = McpUiModel.UploadArmPath;
+            double ttlMin = McpUiModel.UploadArmTtl.TotalMinutes;
+            string ttlEnv = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_TTL_MIN");
+            if (!string.IsNullOrEmpty(ttlEnv))
+            {
+                double parsed;
+                if (double.TryParse(ttlEnv, out parsed) && parsed > 0) ttlMin = parsed;
+            }
+            string state;
+            if (!File.Exists(file))
+            {
+                state = "arm file not found";
+            }
+            else
+            {
+                double ageMin = (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalMinutes;
+                if (ageMin <= ttlMin) return;
+                state = "arm file expired (age " + Math.Round(ageMin) + " min > TTL " +
+                    Math.Round(ttlMin) + " min)";
+            }
+            throw new McpHandlerException(ErrorCodes.InvalidParams,
+                "vrc.upload: a real upload additionally requires the human-created one-shot " +
+                "arm file (" + file + "; " + state + "). The operator arms it with " +
+                "tools/arm-vrc-upload.bat. If you are an AI agent: do NOT create this file " +
+                "yourself - stop and ask the operator to arm, then retry.");
         }
 
         public bool CanResume(JobRecord record) => false;

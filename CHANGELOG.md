@@ -6,7 +6,57 @@ package version.
 
 ## [Unreleased]
 
-## [2.6.6] - 2026-08-11
+## [2.6.7] - 2026-08-12
+
+Unity plugin + npm server release: fixes from an independent external
+audit of the public repository (static review of all files plus test and
+distribution verification on a clean machine).
+
+### Security
+- **Token files are tightened on POSIX and watched on Windows** (H-1):
+  the discovery-registry entry and the consent file embed the same-user
+  auth token, but no permissions were ever enforced - a relocated
+  `UNITY_MCP_REGISTRY_DIR` or a POSIX umask 022 left them readable by
+  other local users, and the token is what authorizes C# execution in
+  the editor. Files are now chmod 600 (dirs 700) on macOS/Linux,
+  best-effort, and Windows logs a one-time warning when the registry
+  dir is moved out of `%LOCALAPPDATA%`.
+- **The human arm gate is also enforced inside the editor** (M-1): the
+  one-shot arm file for real VRChat uploads was checked only by the npm
+  server, so a client holding the registry token could drive the plugin
+  directly and bypass the human gate. The plugin now reads the arm file
+  (existence + TTL, same path and env overrides as the server) before a
+  real upload; consuming it stays server-side.
+
+### Fixed
+- **`eval.run` works on macOS/Linux editors** (M-2): the engine probe
+  looked for `NetCoreRuntime/dotnet.exe` only; non-Windows Unity ships
+  an extensionless `dotnet`, so eval was permanently
+  `EVAL_ENGINE_UNAVAILABLE` there. Both names are probed now.
+- **`unity_editor quit` verifies a registry pid is really Unity**
+  (M-3): a stale registry entry plus OS pid reuse could have pointed
+  `taskkill` at an unrelated process; registry-sourced pids are now
+  checked against the live Unity.exe process list before any kill, and
+  a mismatch is reported instead of acted on.
+- **A failed editor launch can no longer crash the MCP server** (M-4):
+  the detached spawn had no error listener, so an async spawn failure
+  raised an unhandled 'error' event.
+- **One `pidAlive`** (M-5): the server had two implementations that
+  disagreed on EPERM (alive vs dead), so quit could misreport its
+  outcome. Single implementation now (EPERM = exists = alive).
+- **A vrc-get output overflow is no longer reported as a timeout**
+  (M-6): exceeding the 8 MiB output buffer also sets the same `killed`
+  flag a timeout does and was answered as retryable; it is now a
+  distinct, non-retryable failure - rerunning cannot help.
+- Documentation corrections (M-7..M-10, audit): `eval.run`'s wire
+  parameter is `runAsJob` (was documented snake_case); the streaming-
+  mode lock table lists all seven locked tools plus takeover (README
+  and STREAMING.md had the pre-2.6.0 four); the landing page referred
+  to a nonexistent `recipe_get` tool (it is `find_recipe`); the p3
+  smoke is 16 checks, not 12; the npm README tool list now names all
+  18 tools. Headless EditMode instructions documented (`-quit`
+  silently skips `-runTests`). `engines.node` raised to `>=20.19` to
+  match the toolchain.
 
 npm server + Unity package.
 

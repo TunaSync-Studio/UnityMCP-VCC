@@ -16,8 +16,12 @@ UNITY_MCP_STREAM_MASK=CodenameA;MySecretProject     # optional extra terms
 | `execute_editor_command` | **Locked** (`[STREAM_MODE_LOCKED]`) — arbitrary C# = arbitrary side effects |
 | `ndmf_bake_run` | **Locked** — writes assets |
 | `vrc_upload` | **Locked entirely**, including `dry_run` (publishing surface stays zero) |
+| `vpm_manage` | **Locked** — modifies projects / shells out |
+| `unity_editor` | **Locked** — process control, enumerates every project on the machine |
+| `asset_import` | **Locked** — writes into the project (can overwrite assets) |
+| `vcc_project` | **Locked** — enumerates every project on the machine (WIP names would leak on stream) |
 | `session_lease {action:"takeover"}` | **Locked** — cannot steal another session's write lease; `acquire/release/status` still work |
-| All other tools (`get_editor_state`, `scene_query`, `camera_capture`, `get_logs`, `find_recipe`, `unity_health_check`, `job_status`, `job_cancel`) | Available |
+| All other tools (`get_editor_state`, `scene_query`, `camera_capture`, `get_logs`, `find_recipe`, `unity_health_check`, `job_status`, `job_cancel`, `vrc_avatar_audit`, `vrc_menu`) | Available |
 | Tool results, error text, progress messages | `X:\Users\<name>` → `X:\Users\****` (any slash style, JSON-escaped too) + every `UNITY_MCP_STREAM_MASK` term → `****` |
 
 A locked call is refused **before** anything is sent to the Unity plugin.

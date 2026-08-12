@@ -112,6 +112,10 @@ namespace TunaSync.UnityMCP.Editor
             string contents = EditorApplication.applicationContentsPath.Replace('\\', '/');
             string cscDll = contents + "/DotNetSdkRoslyn/csc.dll";
             string dotnetExe = contents + "/NetCoreRuntime/dotnet.exe";
+            // M-2 (2026-08-12 audit): macOS/Linux Unity ships the runtime as
+            // extensionless "dotnet" - the .exe-only probe left eval
+            // permanently EVAL_ENGINE_UNAVAILABLE off Windows.
+            if (!File.Exists(dotnetExe)) dotnetExe = contents + "/NetCoreRuntime/dotnet";
             string cacheDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "UnityMCP", "evalcache",

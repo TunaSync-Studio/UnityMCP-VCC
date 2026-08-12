@@ -1,5 +1,5 @@
 // Single source for the server's own version (package.json mirrors it).
-export const SERVER_VERSION = "2.6.6";
+export const SERVER_VERSION = "2.6.7";
 
 // Injected by esbuild at bundle time (F-13); absent when running from src
 // (tsx dev / vitest), which is exactly the information "dev" conveys.

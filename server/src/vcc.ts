@@ -272,6 +272,15 @@ export const defaultRunner: VrcGetRunner = (args, timeoutMs) =>
           const e = err as NodeJS.ErrnoException & { killed?: boolean };
           if (typeof e.code === "number") {
             resolve({ code: e.code, stdout: String(stdout), stderr: String(stderr) });
+          } else if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+            // M-6 (kimi audit): execFile ALSO sets killed=true on a maxBuffer
+            // kill, so this deterministic failure used to masquerade as a
+            // retryable timeout. Rerunning cannot help - say what happened.
+            reject(
+              new Error(
+                "vrc-get output exceeded the 8 MiB buffer - deterministic failure, not a timeout",
+              ),
+            );
           } else if (e.killed === true) {
             reject(new VrcGetTimeoutError(timeoutMs));
           } else {
@@ -736,6 +745,11 @@ export function launchUnity(projectPath: string, exe: string): { pid: number } {
     detached: true,
     stdio: "ignore",
   });
+  // M-4 (kimi audit): an async spawn failure (exe deleted/EACCES after the
+  // resolve) emits 'error' with no listener and takes the whole MCP server
+  // down. A detached launch failure surfaces naturally as "never became
+  // ready" (no lockfile, no registry entry) - swallow, don't crash.
+  child.on("error", () => {});
   child.unref();
   if (typeof child.pid !== "number") throw new Error("Unity spawn returned no pid");
   return { pid: child.pid };
@@ -753,10 +767,19 @@ export function killProcess(pid: number): { requested: boolean; detail: string }
   return { requested: r.status === 0, detail: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
 
-export function pidAlive(pid: number): boolean {
+// M-5 (kimi audit): this used to be a second implementation that treated
+// EPERM as dead while discovery.ts treats it as alive - quit could misreport
+// its outcome depending on which copy answered. Single source of truth now.
+export { pidAlive } from "./discovery.js";
+
+/**
+ * M-3 (kimi audit): a registry pid is only evidence, not proof - a crashed
+ * editor's stale entry plus OS pid reuse could point taskkill at an innocent
+ * process. Confirm the pid is actually a Unity image before killing it.
+ */
+export function isUnityPid(pid: number): boolean {
   try {
-    process.kill(pid, 0);
-    return true;
+    return listUnityProcesses().some((p) => p.pid === pid);
   } catch {
     return false;
   }

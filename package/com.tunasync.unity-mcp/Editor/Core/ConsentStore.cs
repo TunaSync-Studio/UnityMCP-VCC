@@ -78,6 +78,9 @@ namespace TunaSync.UnityMCP.Editor
                     File.Copy(tmp, path, true);
                     TryDelete(tmp);
                 }
+                // H-1: keep the decision file user-private on POSIX too.
+                SecretFiles.Harden(ConsentDir, isDirectory: true);
+                SecretFiles.Harden(path);
             }
             catch (Exception ex)
             {

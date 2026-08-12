@@ -34,7 +34,18 @@ identical content would make Refresh a no-op.)
 Real stdio server → TCP → plugin: initialize, 18 tools listed, health,
 eval, sectioned state, scene_query, get_logs, find_recipe
 (exact / keyword / redirect), job_status, camera_capture (PNG even under
--nographics via temp-camera fallback). 12 checks.
+-nographics via temp-camera fallback). 16 checks. Note: a `DOMAIN_RELOAD`
+answer is retryable — when p3 runs right after p2's reload cycle a check
+can fail transiently; rerun p3 standalone before treating it as real.
+
+### Unity EditMode tests, headless
+
+```
+Unity.exe -batchmode -projectPath <proj> -runTests -testPlatform EditMode -testResults <xml> -logFile <log>
+```
+
+Do NOT add `-quit`: with `-runTests` it makes Unity exit before the test
+run and the tests are silently skipped (exit code 0, no results XML).
 
 ## 4. SDK testbed (defines ON — VRC avatars + NDMF stack)
 

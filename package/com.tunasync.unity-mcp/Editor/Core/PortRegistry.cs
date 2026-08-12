@@ -118,7 +118,11 @@ namespace TunaSync.UnityMCP.Editor
 
         private static void WriteAtomic()
         {
-            Directory.CreateDirectory(RegistryDir);
+            string dir = RegistryDir;
+            Directory.CreateDirectory(dir);
+            // H-1: the entry embeds the connection token.
+            SecretFiles.Harden(dir, isDirectory: true);
+            SecretFiles.WarnIfRelocated(dir, "UNITY_MCP_REGISTRY_DIR");
             string tmp = _filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(tmp, _cachedJson, new UTF8Encoding(false));
             try
@@ -143,6 +147,7 @@ namespace TunaSync.UnityMCP.Editor
                 File.Copy(tmp, _filePath, true);
                 TryDelete(tmp);
             }
+            SecretFiles.Harden(_filePath);
         }
 
         private static void SweepDeadSiblings()

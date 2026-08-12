@@ -155,7 +155,7 @@ PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
 | `sys.modal` | (2.6.4) `{pid, lastTickAgoMs, modal?, modalCount}` — native-dialog probe (user32), served from the transport thread so it answers while the main thread is blocked. The server's blocked-editor probe uses this (fallback for older plugins: `sys.echo` → watchdog `BUSY_MODAL`) |
 | `sys.compile.status` | last compile result: `{compiling, finishedAt?, diagnostics[]}` (persisted across reload) |
 | `sys.echo` | `{...}` → same back (tests) |
-| `eval.run` | `{code, captureLogs?, run_as_job?, allowPlayMode?}` → `{result, logs[], executionMs, engine}`; refused with `PLAY_MODE_ACTIVE` in play mode unless `allowPlayMode:true` (checked again at job execution time) |
+| `eval.run` | `{code, captureLogs?, runAsJob?, allowPlayMode?}` → `{result, logs[], executionMs, engine}`; refused with `PLAY_MODE_ACTIVE` in play mode unless `allowPlayMode:true` (checked again at job execution time) |
 | `lease.acquire` / `lease.release` / `lease.status` / `lease.takeover` | write lease, default TTL 120 s; `{ttlMs?}` per acquire/takeover (clamped 5 s-1 h). Identity = the connection's `hello.client.sessionId`; a foreign `clientId` is INVALID_PARAMS |
 | `job.submit` | `{method, params}` → `{jobId}` |
 | `job.status` | `{jobId?}` → one JobRecord; omitted → ALL records as a **bare array** (`JobManager.AllRecords()`) |
