@@ -147,10 +147,10 @@ async function vpmCreate(args: {
       }),
     );
   }
-  if (findVrcGet() === null) {
+  if (vpmRunner === defaultRunner && findVrcGet() === null) {
     // resolve is integral to create (templates declare packages but lock
     // nothing), so require the CLI up front instead of leaving a half-set-up
-    // project as a surprise.
+    // project as a surprise. An injected runner (tests) spawns nothing.
     return fail(
       new UnityMcpError({
         code: "VRC_GET_NOT_FOUND",
@@ -1298,7 +1298,10 @@ const toolTable: readonly ToolRegistrar[] = [
       if (args.action === "create") {
         return vpmCreate(args);
       }
-      if (findVrcGet() === null) {
+      // An injected runner (tests) does not spawn vrc-get - only the real
+      // default runner needs the CLI on PATH. (Surfaced by CI's first Linux
+      // run: the Windows dev machines all had vrc-get.exe installed.)
+      if (vpmRunner === defaultRunner && findVrcGet() === null) {
         const message = VRC_GET_INSTALL_HINT;
         return {
           content: [
