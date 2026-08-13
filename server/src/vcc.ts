@@ -202,7 +202,11 @@ export function registerInVcc(
     list.unshift(winPath);
     parsed.userProjects = list;
     fs.copyFileSync(settingsFile, settingsFile + ".bak-unity-mcp");
-    fs.writeFileSync(settingsFile, JSON.stringify(parsed, null, 2));
+    // L-10 (audit): a direct overwrite could destroy VCC's settings on a
+    // mid-write crash. Temp + rename is atomic on one volume.
+    const tmp = `${settingsFile}.tmp-unity-mcp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(parsed, null, 2));
+    fs.renameSync(tmp, settingsFile);
     return { registered: true };
   } catch (err) {
     return { registered: false, reason: `settings.json update failed: ${(err as Error).message}` };
@@ -229,7 +233,10 @@ let cachedVrcGet: string | null | undefined;
 /** Locate vrc-get on PATH (cached per process). */
 export function findVrcGet(): string | null {
   if (cachedVrcGet !== undefined) return cachedVrcGet;
-  const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+  // L-1 (audit): .cmd/.bat cannot be started by execFile (no shell) - finding
+  // one produced an EINVAL that read like a generic crash. Real installs ship
+  // vrc-get.exe (or an extensionless binary elsewhere); only accept those.
+  const exts = process.platform === "win32" ? [".exe"] : [""];
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
@@ -319,15 +326,25 @@ export function vpmActionSpec(
   action: string,
   opts: { project?: string; package?: string; version?: string },
 ): VpmActionSpec {
+  // L-2 (audit): a leading "-" would be parsed by vrc-get as a FLAG, not a
+  // value (argument injection through package/version). Reject rather than
+  // insert "--": vrc-get's own flag parsing varies per subcommand.
+  const noFlag = (label: string, v: string): string => {
+    if (v.startsWith("-")) {
+      throw new Error(`vpm_manage ${action}: '${label}' may not start with '-' (got '${v}')`);
+    }
+    return v;
+  };
   const project = opts.project;
   const needProject = (): string => {
     if (!project) throw new Error(`vpm_manage ${action}: 'project' is required`);
-    return project;
+    return noFlag("project", project);
   };
   const needPackage = (): string => {
     if (!opts.package) throw new Error(`vpm_manage ${action}: 'package' is required`);
-    return opts.package;
+    return noFlag("package", opts.package);
   };
+  if (opts.version !== undefined) noFlag("version", opts.version);
   switch (action) {
     case "repos":
       return { args: ["repo", "list"], json: false, write: false };
@@ -695,7 +712,15 @@ export function resolveUnityExe(
 ): { exe: string | null; source: string; version: string | null } {
   const version = projectEditorVersion(projectPath);
   if (explicit) {
-    return { exe: fs.existsSync(explicit) ? explicit : null, source: "editor_path", version };
+    // L-5 (audit): editor_path used to accept ANY existing executable - this
+    // tool would then spawn it. Constrain to a Unity editor binary by name.
+    const base = path.basename(explicit).toLowerCase();
+    const isUnity = base === "unity.exe" || base === "unity";
+    return {
+      exe: isUnity && fs.existsSync(explicit) ? explicit : null,
+      source: "editor_path",
+      version,
+    };
   }
   try {
     const settings = JSON.parse(fs.readFileSync(vccSettingsPath(), "utf8")) as {

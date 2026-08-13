@@ -6,6 +6,48 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.8] - 2026-08-12
+
+Unity plugin + npm server release: the audit's remaining actionable
+robustness items, CI, and a documentation refresh. Supersedes 2.6.7 on
+npm (2.6.7 shipped to GitHub/VPM only; everything in it is included
+here).
+
+### Added
+- **CI** (`.github/workflows/ci.yml`): typecheck, the full vitest suite
+  (real-TCP mock plugin included), the esbuild bundle and the metadata
+  smoke now run on every push/PR, on Ubuntu and Windows. Shipped quality
+  was previously guarded by local release gates only.
+
+### Fixed
+- Robustness (audit follow-ups): the log-query regex is length-capped
+  (ReDoS surface); `vpm_manage` rejects `-`-leading package/version
+  values (argument injection); the arm file is consumed atomically
+  (rename claim — two concurrent real-upload attempts can no longer
+  both pass one arm); `unity_editor launch`'s `editor_path` must point
+  at a Unity editor binary; the TCP dial phase is timeout-bounded (a
+  SYN hang could park the reconnect loop forever); a send on a closing
+  socket answers retryably instead of waiting out the 60 s timeout;
+  VCC's `settings.json` is updated via temp+rename (no more torn file
+  on a mid-write crash); `vrc-get` discovery no longer accepts
+  `.cmd`/`.bat` shims it cannot spawn.
+- Plugin robustness: connection count capped at 16 (pre-auth
+  thread/handle exhaustion); `ndmf.bake`'s `outputDir` must stay under
+  `Assets/` with no traversal; a malformed request field answers
+  `INVALID_PARAMS` instead of tearing the session down; an oversized
+  response answers an error instead of silently killing the session;
+  `asset.importPackage` unsubscribes its callbacks when the import
+  throws synchronously; the unauthenticated HTTP health endpoint no
+  longer discloses the project path (user name) — `projectName` stays;
+  csc diagnostics are forced to English (`-preferreduilang:en`) so
+  Japanese-locale editors stop producing mojibake diagnostics.
+- Documentation refresh: READMEs (EN/JA) describe the current 18-tool
+  surface (upgrade action, two-stage editor detection, dialog naming,
+  baked-prefab audits), the POSIX status, the Unity-6-out-of-scope
+  policy, and the both-sides arm gate; `NOTICE.md` credits the bundled
+  MIT dependencies (@modelcontextprotocol/sdk, zod); the recipe-format
+  doc explains the body-only `sha1` and the doc/redirect text blocks.
+
 ## [2.6.7] - 2026-08-12
 
 Unity plugin + npm server release: fixes from an independent external

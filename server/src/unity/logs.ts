@@ -93,6 +93,13 @@ export class LogRing {
   query(q: LogQuery = {}): LogEntry[] {
     let re: RegExp | null = null;
     if (q.regex !== undefined) {
+      // L-4 (audit): the pattern comes from the AI client and runs against up
+      // to 2000 entries - an exponential-backtracking pattern can block the
+      // event loop indefinitely. A length cap removes the practical ReDoS
+      // surface (catastrophic patterns need room to nest).
+      if (q.regex.length > 200) {
+        throw makeError("INVALID_PARAMS", "regex too long (max 200 chars)");
+      }
       try {
         re = new RegExp(q.regex, "i");
       } catch (err) {

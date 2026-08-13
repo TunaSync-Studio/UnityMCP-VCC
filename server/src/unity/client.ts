@@ -225,7 +225,15 @@ export class UnityClient {
       ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
     });
     const wired = this.wireAbort(env.id, promise, opts?.signal);
-    this.conn?.send(env);
+    if (this.conn?.send(env) !== true) {
+      // L-7 (audit): a failed write used to sit silently until the 60 s
+      // timeout. The socket raced shut - answer now, retryably.
+      this.pending.cancelLocal(env.id, {
+        code: "UNITY_UNREACHABLE",
+        message: "connection could not transmit (socket closed mid-send)",
+        retryable: true,
+      });
+    }
     return wired;
   }
 

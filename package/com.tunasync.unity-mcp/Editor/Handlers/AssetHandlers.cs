@@ -83,7 +83,19 @@ namespace TunaSync.UnityMCP.Editor
             };
             AssetDatabase.importPackageCompleted += completed;
             AssetDatabase.importPackageFailed += failed;
-            AssetDatabase.ImportPackage(full, false);
+            try
+            {
+                AssetDatabase.ImportPackage(full, false);
+            }
+            catch (Exception)
+            {
+                // L-23 (audit): a synchronous throw here used to leave both
+                // callbacks subscribed forever (and the collector open).
+                AssetDatabase.importPackageCompleted -= completed;
+                AssetDatabase.importPackageFailed -= failed;
+                AssetImportCollector.End();
+                throw;
+            }
             return tcs.Task;
         }
     }

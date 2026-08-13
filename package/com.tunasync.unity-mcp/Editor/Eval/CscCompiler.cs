@@ -165,6 +165,11 @@ namespace TunaSync.UnityMCP.Editor
             sb.Append("-deterministic\n");
             sb.Append("-langversion:latest\n");
             sb.Append("-utf8output\n");
+            // Audit live find: on Japanese Windows, localized csc diagnostics
+            // still arrived mojibake despite -utf8output (a codepage mismatch
+            // somewhere in the pipe). English messages sidestep the encoding
+            // entirely and are what the error-code lookup expects anyway.
+            sb.Append("-preferreduilang:en\n");
             if (env.Defines != null && env.Defines.Length > 0)
             {
                 sb.Append("-define:").Append(string.Join(";", env.Defines)).Append('\n');

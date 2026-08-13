@@ -9,10 +9,26 @@ namespace TunaSync.UnityMCP.Editor.Tests
     {
         private const string Session = "test-f6-session";
 
+        // Audit note: LeaseManager is a static singleton backed by
+        // SessionState - running these tests inside a live editor could
+        // clobber a real client's lease. Save and restore around each test.
+        private string _priorHolder;
+        private long _priorTtlMs;
+
+        [SetUp]
+        public void SaveRealLease()
+        {
+            object status = LeaseManager.StatusObject();
+            _priorHolder = (string)status.GetType().GetProperty("holder")?.GetValue(status);
+            _priorTtlMs = LeaseManager.CurrentTtlMs();
+            if (_priorHolder != null) LeaseManager.Release(_priorHolder);
+        }
+
         [TearDown]
         public void ReleaseLease()
         {
             LeaseManager.Release(Session);
+            if (_priorHolder != null) LeaseManager.TryAcquire(_priorHolder, _priorTtlMs);
         }
 
         [Test]

@@ -90,6 +90,16 @@ namespace TunaSync.UnityMCP.Editor
                                 DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
                 }
                 outputDir = outputDir.Replace('\\', '/').TrimEnd('/');
+                // L-17 (audit): an unvalidated outputDir could create
+                // directories anywhere on disk. Bakes are assets; the
+                // destination must stay inside Assets/ with no traversal.
+                if (!outputDir.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)
+                    || outputDir.Contains(".."))
+                {
+                    throw new McpHandlerException(ErrorCodes.InvalidParams,
+                        "ndmf.bake: outputDir must be a project-relative path under Assets/ " +
+                        "without '..' (got '" + outputDir + "')");
+                }
                 EnsureAssetFolder(outputDir);
 
                 string prefabPath = AssetDatabase.GenerateUniqueAssetPath(

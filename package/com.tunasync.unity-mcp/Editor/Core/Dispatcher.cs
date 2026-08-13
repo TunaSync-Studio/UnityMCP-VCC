@@ -108,7 +108,30 @@ namespace TunaSync.UnityMCP.Editor
                     ErrorObj.Make(ErrorCodes.ProtocolError, "req frame without id")));
                 return;
             }
+            // L-18 (audit): a malformed field (non-string `method` etc.) used
+            // to throw on the transport thread and tear the whole session
+            // down - one bad request could kill a connection. Malformed input
+            // is the request's problem, not the session's.
+            try
+            {
+                DispatchCore(env, session);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    session.Send(Frames.ResError(env.Id,
+                        ErrorObj.Make(ErrorCodes.InvalidParams,
+                            "malformed request: " + ex.Message)));
+                }
+                catch
+                {
+                }
+            }
+        }
 
+        private static void DispatchCore(Envelope env, ClientSession session)
+        {
             JObject payload = env.Payload ?? new JObject();
             string method = payload["method"] != null ? payload["method"].Value<string>() : null;
             if (string.IsNullOrEmpty(method))

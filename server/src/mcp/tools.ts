@@ -944,7 +944,15 @@ const toolTable: readonly ToolRegistrar[] = [
       if (!args.dry_run) {
         const arm = checkArm(ctx.cfg);
         if (!arm.armed) return armRequiredResult(arm);
-        consumeArm(arm.file);
+        // L-3: consume is an atomic claim now - if a concurrent call won the
+        // race between our check and here, this attempt is NOT armed.
+        if (!consumeArm(arm.file)) {
+          return armRequiredResult({
+            armed: false,
+            file: arm.file,
+            detail: "arm was consumed by a concurrent attempt",
+          });
+        }
       }
       const { client } = ctx.pool.resolve(args.project);
       const bridge = makeProgressBridge(extra);

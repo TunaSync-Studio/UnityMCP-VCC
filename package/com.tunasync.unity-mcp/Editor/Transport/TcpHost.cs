@@ -216,6 +216,18 @@ namespace TunaSync.UnityMCP.Editor
                     break;
                 }
 
+                // L-15 (audit): no cap let a local pre-auth attacker exhaust
+                // threads/handles with mass connects. 16 covers every real
+                // multi-client scenario (live-tested 3) with headroom.
+                int liveCount;
+                lock (_sessionsGate) liveCount = _sessions.Count;
+                if (liveCount >= 16)
+                {
+                    Debug.LogWarning("[UnityMCP] connection cap (16) reached - rejecting new connection");
+                    try { client.Close(); } catch { }
+                    continue;
+                }
+
                 try
                 {
                     client.NoDelay = true;
@@ -283,11 +295,15 @@ namespace TunaSync.UnityMCP.Editor
         /// <summary>HTTP health body. No Unity API: cached info + pump snapshot only (transport thread).</summary>
         public string BuildHealthJson()
         {
+            // L-14 (audit): this endpoint is unauthenticated (that is its
+            // point - a liveness probe) and reachable by any local process or
+            // a DNS-rebound web page. projectPath embedded the OS user name;
+            // projectName is enough to tell editors apart. Everything that
+            // needs the full path authenticates over the framed protocol.
             MainThreadPump.Snapshot snap = MainThreadPump.Current;
             return Protocol.Serialize(new
             {
                 status = "ok",
-                projectPath = McpEditorInfo.ProjectPath,
                 projectName = McpEditorInfo.ProjectName,
                 unityVersion = McpEditorInfo.UnityVersion,
                 pluginVersion = McpEditorInfo.PluginVersion,

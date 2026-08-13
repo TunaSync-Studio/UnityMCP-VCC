@@ -60,13 +60,13 @@ describe("handshake", () => {
     expect((err as UnityMcpError).code).toBe("VERSION_UNSUPPORTED");
   });
 
-  it("rejects when the welcome carries a protocol version above the client max", async () => {
-    // A buggy plugin that "picks" v99: the client must refuse it.
+  it("negotiates down to the client max against a higher-versioned plugin", async () => {
+    // Audit note: this test was once named "rejects ... v99" while asserting
+    // SUCCESS - the mock negotiates correctly (min(ourMax=1, plugin=99) = 1),
+    // so the contract under test is downward negotiation, not rejection.
     mock = new MockPlugin({ versionMin: 1, versionMax: 99 });
     const port = await mock.start();
     conn = new Connection({ host: "127.0.0.1", port, hello: hello(), events: silentEvents() });
-    // min(client.max=1, plugin.max=99) = 1, so this actually succeeds - the
-    // mock negotiates correctly. Assert the negotiated version is OUR max.
     const welcome = await conn.connect();
     expect(welcome.v).toBe(1);
   });

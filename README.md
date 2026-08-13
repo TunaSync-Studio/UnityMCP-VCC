@@ -17,7 +17,7 @@ of this release tree.
 https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json
 ```
 
-**2 — AI side (MCP client, Node 20+):**
+**2 — AI side (MCP client, Node 20.19+):**
 
 ```bash
 # Claude Code
@@ -43,7 +43,7 @@ Details (UPM path, manual MCP config, arming real uploads): `docs/INSTALL.md`.
 MCP client (Claude, Codex, Cursor, any MCP host - N sessions)
    │  stdio
    ▼
-server/  tunasync-unity-mcp (Node 20+, MCP SDK 1.x, single esbuild bundle)
+server/  tunasync-unity-mcp (Node 20.19+, MCP SDK 1.x, single esbuild bundle)
    │  TCP 127.0.0.1:<port>, uint32-BE length-prefixed JSON envelopes
    │  correlation ids, tombstones, reconnect state machine, progress bridging
    ▼
@@ -79,26 +79,36 @@ package/com.tunasync.unity-mcp  (Editor-only VPM/UPM package)
 `job_status`, `job_cancel`, `find_recipe`, `ndmf_bake_run`, `vrc_upload`
 (avatar/world, `dry_run` = preupload check), `vrc_avatar_audit`.
 
-Plus a **VCC/VPM pair that needs no running editor** (v2.4.x):
+Plus a **VCC/VPM pair that needs no running editor**:
 `vcc_project` (list the projects VCC knows about / read one project's
 locked VPM packages — pure file reads) and `vpm_manage` (add / remove /
-resolve / outdated / repo list, and **`create`** — bootstrap a brand-new
-project from a VCC template, resolve it and install extras before Unity
-ever starts — via the open-source
+resolve / **upgrade** / outdated / repo list, and **`create`** — bootstrap
+a brand-new project from a VCC template, resolve it and install extras
+before Unity ever starts — via the open-source
 [vrc-get](https://github.com/vrc-get/vrc-get) CLI; without vrc-get on PATH
 the tool answers with install instructions while `vcc_project` keeps
 working). Both are locked in streaming mode like the other destructive
 tools.
 
-v2.6.0 adds three more: `unity_editor` (launch / quit / status for the
-editor process itself — Unity.exe resolved via VCC settings or the Hub,
-`-projectPath` spawn only, graceful quit first), `asset_import`
-(first-class non-interactive `.unitypackage` import that answers with the
-imported asset list) and `vrc_menu` (expression-menu `tree` / `audit`;
-the audit flags dead menu items by checking that the transforms a
-parameter's layers animate still exist on the avatar).
+And three editor-lifecycle tools: `unity_editor` (launch / quit / status —
+Unity.exe resolved via VCC settings or the Hub, `-projectPath` spawn only;
+open-detection is two-stage — `Temp/UnityLockfile` plus the discovery
+registry — quit verifies the pid is really Unity and finds Safe-Mode
+editors by OS scan, and a launch blocked by a startup dialog names it),
+`asset_import` (first-class non-interactive `.unitypackage` import that
+answers with the imported asset list) and `vrc_menu` (expression-menu
+`tree` / `audit`; the audit judges every parameter a control drives —
+puppets included — and flags dead menu items whose animated transforms no
+longer exist; both accept a baked prefab asset path as well as a scene
+object).
 
-Everything the legacy 426 tools did is preserved as 400+ **recipes**
+When an editor is blocked, `BUSY_MODAL` errors and `unity_health_check`
+name the native dialog that is holding it (title, buttons, and whether it
+is a self-clearing progress dialog or a decision a human must answer) —
+probed via user32 on the plugin's transport thread, so it works exactly
+while the main thread is stuck.
+
+Everything the legacy 426 tools did is preserved as 412 shipped **recipes**
 (`recipes/`): markdown files whose fenced C# block you can paste into
 `execute_editor_command`'s `code` as-is (paste the code block, not the
 whole markdown file) — the eval layer auto-wraps bare statement
@@ -125,19 +135,22 @@ rest; recipes are also exposed as MCP resources
 - **Consent + auth**: nothing listens until you enable the bridge for that
   project (one-time dialog), the socket is loopback-only, and clients must
   present a token that only your OS user can read.
-- **Platform**: **Windows only** today. Consent/registry paths use
-  `%LOCALAPPDATA%` and the eval engine invokes Unity's bundled Roslyn via
-  `Editor/Data/NetCoreRuntime/dotnet.exe`. macOS/Linux are untested.
+- **Platform**: developed and verified on **Windows**. The pieces that were
+  Windows-hardcoded now handle POSIX (extensionless `dotnet` probe for eval,
+  `UNITY_MCP_REGISTRY_DIR` on both sides, chmod-tightened token files), but
+  macOS/Linux have not been exercised on real machines yet — treat them as
+  best-effort.
 - **Unity**: verified on **2022.3.22f1** (VRChat's version). Other 2022.3
-  patches should be fine; Unity 6 / other majors are unverified — the eval
-  toolchain probe fails loudly and `eval.run` returns
-  `EVAL_ENGINE_UNAVAILABLE` rather than misbehaving.
+  patches should be fine. Unity 6 / other majors are **out of scope** —
+  VRChat pins the editor version, and on an unsupported toolchain the eval
+  probe fails loudly (`EVAL_ENGINE_UNAVAILABLE`) rather than misbehaving.
 - **`vrc_upload`**: `dry_run:true` (validation) and the real avatar publish
   path are both verified live on a real avatar project (2026-08-06); the
   world `dry_run` path is verified live on a published world (2026-08-07).
-  Since v2.2.0 a real upload is double-gated: it requires `confirm:true`
-  (caller intent) **and** a human-created one-shot arm file (TTL 30 min,
-  consumed per attempt) — an AI following its instructions will not publish
+  A real upload is double-gated — `confirm:true` (caller intent) **and** a
+  human-created one-shot arm file (TTL 30 min, atomically consumed per
+  attempt) — and since v2.6.7 the arm file is checked **inside the editor
+  plugin too**, so even a client that bypasses this server cannot publish
   unattended. Arming without a repo checkout: see
   `docs/INSTALL.md` § "Arming a real VRChat upload".
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks the destructive /
@@ -149,12 +162,15 @@ rest; recipes are also exposed as MCP resources
 ## Known issues
 
 - `vrc_avatar_audit`'s `textureMegabytes` counts textures reachable through
-  renderers only; textures referenced solely via animation clips or
-  build-time generators (e.g. Modular Avatar swaps) are not counted — on one
-  measured avatar that hid ~8% of the real total. Treat it as a lower bound
-  near the limits.
-- Unity 6 is unverified (VRChat currently ships on 2022.3; the eval
-  toolchain probe fails loudly rather than misbehaving).
+  renderers only (a lower bound). The audit supplements it with
+  `textureMegabytesAnimOnly` — textures reached solely via animation
+  object-reference curves (e.g. Modular Avatar material swaps). That
+  supplement is **always 0 on an unbaked avatar** (MA swaps become curves
+  only during the NDMF build): run `ndmf_bake_run` and audit the returned
+  `outputPrefabPath` for the true figure — the audit accepts the prefab
+  asset path directly.
+- Unity 6 is out of scope (VRChat pins 2022.3; the eval toolchain probe
+  fails loudly rather than misbehaving).
 - Recipe front matter under-declares `params:` on some recipes; the eval
   layer stubs an empty `args` so they run and self-report which fields they
   need (see the recipes paragraph above).

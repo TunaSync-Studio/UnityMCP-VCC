@@ -1,7 +1,7 @@
 {
     "name": "com.tunasync.unity-mcp",
     "displayName": "TunaSync Unity MCP",
-    "version": "2.6.7",
+    "version": "2.6.8",
     "unity": "2022.3",
     "description": "Local-first Unity Editor bridge for Codex, Claude, Cursor and other MCP hosts. Includes a Creator Console, loopback transport, jobs, diagnostics, write lease and human-gated VRChat uploads.",
     "author": {

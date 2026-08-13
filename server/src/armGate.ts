@@ -65,13 +65,26 @@ export function checkArm(
   return { armed: true, file, detail: `armed (age ${Math.round(ageMs / 1000)} s)` };
 }
 
-/** One-shot: delete the arm file when an attempt starts. Best-effort. */
-export function consumeArm(file: string): void {
+/**
+ * One-shot: claim the arm file when an attempt starts. L-3 (audit): a plain
+ * unlink let two concurrent calls both pass the check and both "consume" the
+ * same arm. rename is atomic on one volume - exactly one caller wins; the
+ * loser sees false and must answer ARM_REQUIRED. Returns true when this
+ * caller claimed the arm.
+ */
+export function consumeArm(file: string): boolean {
+  const claimed = `${file}.claimed-${process.pid}-${Date.now()}`;
   try {
-    fs.unlinkSync(file);
+    fs.renameSync(file, claimed);
   } catch {
-    // already gone / locked: the TTL still bounds the window
+    return false; // already claimed / already gone
   }
+  try {
+    fs.unlinkSync(claimed);
+  } catch {
+    // claim succeeded; leftover tmp is harmless and outside the arm path
+  }
+  return true;
 }
 
 export function armRequiredResult(arm: ArmCheck): CallToolResult {

@@ -96,8 +96,23 @@ export class Connection {
       this.socket = sock;
       sock.setNoDelay(true);
 
+      // L-6 (audit): the hello timer only arms AFTER 'connect' - a SYN that
+      // never completes left the dial (and the caller's runLoop) hanging
+      // forever. Bound the dial phase with the same budget.
+      const dialTimer = setTimeout(() => {
+        if (this.socket !== sock) return;
+        if (this.stateValue !== "connecting") return;
+        this.failHandshake(
+          makeError("HELLO_TIMEOUT", `TCP connect not established within ${this.helloTimeoutMs} ms`, {
+            retryable: false,
+          }),
+        );
+      }, this.helloTimeoutMs);
+      dialTimer.unref?.();
+
       sock.on("connect", () => {
         if (this.socket !== sock) return;
+        clearTimeout(dialTimer);
         this.stateValue = "handshaking";
         this.opts.events.onHandshaking?.();
         this.writeRaw({

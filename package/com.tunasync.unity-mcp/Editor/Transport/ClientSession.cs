@@ -425,7 +425,30 @@ namespace TunaSync.UnityMCP.Editor
             {
                 foreach (Envelope env in _sendQueue.GetConsumingEnumerable())
                 {
-                    byte[] frame = FrameCodec.EncodeFrame(env);
+                    byte[] frame;
+                    try
+                    {
+                        frame = FrameCodec.EncodeFrame(env);
+                    }
+                    catch (InvalidDataException)
+                    {
+                        // L-19 (audit): an oversized response used to throw
+                        // here and silently kill the whole session. Answer
+                        // the request with an error instead and keep going.
+                        if (env.Type == FrameType.Res)
+                        {
+                            frame = FrameCodec.EncodeFrame(Frames.ResError(env.Id,
+                                ErrorObj.Make(ErrorCodes.HandlerException,
+                                    "response exceeded the " + Protocol.MaxFrameBytes +
+                                    " byte frame limit - narrow the query (sections/max_bytes)")));
+                        }
+                        else
+                        {
+                            Debug.LogWarning("[UnityMCP] dropped oversized outbound frame (" +
+                                env.Type + ")");
+                            continue;
+                        }
+                    }
                     _stream.Write(frame, 0, frame.Length);
                 }
             }

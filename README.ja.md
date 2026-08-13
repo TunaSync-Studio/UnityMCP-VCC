@@ -18,7 +18,7 @@ Unity Editor を AI から操縦する MCP ブリッジ — VRChat のアバタ�
 https://tunasync-studio.github.io/UnityMCP-VCC/vpm/index.json
 ```
 
-**2 — AI 側 (MCP クライアント・Node 20+):**
+**2 — AI 側 (MCP クライアント・Node 20.19+):**
 
 ```bash
 # Claude Code
@@ -44,7 +44,7 @@ npx -y tunasync-unity-mcp doctor
 MCP クライアント (Claude, Codex, Cursor など任意の MCP ホスト - N セッション)
    │  stdio
    ▼
-server/  tunasync-unity-mcp (Node 20+, MCP SDK 1.x, esbuild 単一バンドル)
+server/  tunasync-unity-mcp (Node 20.19+, MCP SDK 1.x, esbuild 単一バンドル)
    │  TCP 127.0.0.1:<port>, uint32-BE 長さ接頭辞付き JSON エンベロープ
    │  相関ID, tombstone, 再接続ステートマシン, 進捗ブリッジ
    ▼
@@ -78,25 +78,34 @@ package/com.tunasync.unity-mcp  (Editor 専用 VPM/UPM パッケージ)
 `job_status`、`job_cancel`、`find_recipe`、`ndmf_bake_run`、`vrc_upload`
 (avatar/world・`dry_run`=アップロード前検査)、`vrc_avatar_audit`。
 
-さらに **Unity Editor の起動が不要な VCC/VPM ペア** (v2.4.x):
+さらに **Unity Editor の起動が不要な VCC/VPM ペア**:
 `vcc_project` (VCC が知っているプロジェクトの一覧 / 1 プロジェクトの
 ロック済み VPM パッケージ読み取り — 純粋なファイル読みのみ) と
-`vpm_manage` (add / remove / resolve / outdated / repo 一覧、そして
-**`create`** — VCC テンプレートから新規プロジェクトを丸ごと構築し、
+`vpm_manage` (add / remove / resolve / **upgrade** / outdated / repo 一覧、
+そして **`create`** — VCC テンプレートから新規プロジェクトを丸ごと構築し、
 resolve と追加パッケージ導入まで Unity 起動前に済ませる — を
 オープンソースの [vrc-get](https://github.com/vrc-get/vrc-get) CLI 経由で実行。
 vrc-get が PATH に無い場合はインストール案内を返し、`vcc_project` はそのまま
 動き続けます)。「MA 入りの新しいアバタープロジェクト作って」が Unity を
 開く前に完了します。変更系は配信モードでは他の破壊系ツールと同様ロックされます。
 
-v2.6.0 でさらに3本: `unity_editor` (エディタプロセスの launch / quit /
-status — Unity.exe は VCC 設定か Hub から解決・`-projectPath` 起動のみ・
-quit は graceful 優先)、`asset_import` (`.unitypackage` の一級インポート・
-常に非対話・取込アセット一覧を返す)、`vrc_menu` (メニューの `tree` /
-`audit` — パラメータのレイヤーが animate する Transform の実在まで検査して
-「死にメニュー」を炙り出します)。
+エディタライフサイクル3本: `unity_editor` (launch / quit / status —
+Unity.exe は VCC 設定か Hub から解決・`-projectPath` 起動のみ。開いているかの
+判定は `Temp/UnityLockfile`+discovery レジストリの2段構え、quit は pid が本当に
+Unity か検証してから・Safe Mode のエディタも OS スキャンで見つけ、起動を
+塞いでいるダイアログは launch が名指しします)、`asset_import`
+(`.unitypackage` の一級インポート・常に非対話・取込アセット一覧を返す)、
+`vrc_menu` (メニューの `tree` / `audit` — puppet 含む全パラメータを判定し、
+animate 対象 Transform の実在まで検査して「死にメニュー」を炙り出します。
+どちらもシーンオブジェクトに加えベイク済みプレハブの資産パスを直接受けます)。
 
-旧 426 ツールの機能はすべて 400 本超の **レシピ** (`recipes/`) として保存されています:
+エディタがブロックされている時は、`BUSY_MODAL` エラーと `unity_health_check`
+が**塞いでいるネイティブダイアログを名指し**します (タイトル・ボタン・
+「勝手に消える進捗」か「人間が答えるべき確認」かの種別まで) — plugin の
+transport thread 上の user32 プローブなので、main thread が固まっている
+まさにその時に動きます。
+
+旧 426 ツールの機能はすべて 出荷 412 本の **レシピ** (`recipes/`) として保存されています:
 markdown 内のフェンス付き C# ブロックを `execute_editor_command` の `code` に
 そのまま貼れます (markdown ファイル全体ではなくコードブロックを貼ること) —
 eval 層が素の文スニペットを `class EditorCommand { static object Execute() }`
@@ -121,19 +130,21 @@ MCP リソース (`recipe://<category>/<name>`) としても公開されます�
 - **同意+認証**: そのプロジェクトで有効化するまで何もリッスンしません
   (初回のみのダイアログ)。ソケットはループバック専用で、クライアントは
   あなたの OS ユーザーしか読めないトークンの提示が必要です。
-- **プラットフォーム**: 現状 **Windows のみ**。同意/レジストリのパスが
-  `%LOCALAPPDATA%` を使い、eval エンジンが Unity 同梱の
-  `Editor/Data/NetCoreRuntime/dotnet.exe` を起動します。macOS/Linux は未検証。
+- **プラットフォーム**: 開発・検証は **Windows**。Windows 固定だった箇所は
+  POSIX 対応済み (eval の拡張子なし `dotnet` プローブ・両側の
+  `UNITY_MCP_REGISTRY_DIR`・トークンファイルの chmod 強化) ですが、
+  macOS/Linux の実機ではまだ検証していません — ベストエフォート扱いで。
 - **Unity**: **2022.3.22f1** (VRChat のバージョン) で検証済み。他の 2022.3
-  パッチは動くはずです。Unity 6 / 他メジャーは未検証 — eval ツールチェーンの
-  プローブは大声で失敗し、`eval.run` は誤動作せず `EVAL_ENGINE_UNAVAILABLE`
-  を返します。
+  パッチは動くはずです。Unity 6 / 他メジャーは**対象外** — VRChat がエディタ
+  バージョンを固定しており、非対応ツールチェーンでは eval プローブが誤動作せず
+  明示的に失敗します (`EVAL_ENGINE_UNAVAILABLE`)。
 - **`vrc_upload`**: `dry_run:true` (検証) と実アバター公開経路は実プロジェクトで
   実射検証済み (2026-08-06)。ワールドの `dry_run` 経路は公開済みワールドで
-  実射検証済み (2026-08-07)。v2.2.0 以降、実アップロードは二重ゲートです:
+  実射検証済み (2026-08-07)。実アップロードは二重ゲート —
   `confirm:true` (呼び出し側の意思) **と** 人間が作る一回限りの arm ファイル
-  (TTL 30 分・試行ごとに消費) の両方が必要 — 指示に従う AI が無人で公開する
-  ことはありません。リポジトリのチェックアウト無しで arm する方法:
+  (TTL 30 分・試行ごとにアトミック消費) — で、v2.6.7 からは **arm ファイルを
+  エディタプラグイン側でも検査**するため、このサーバを迂回するクライアント
+  でも無人公開はできません。リポジトリのチェックアウト無しで arm する方法:
   `docs/INSTALL.md` の「Arming a real VRChat upload」参照。
 - **配信モード**: `UNITY_MCP_STREAM_MODE=1` で破壊系・公開系ツールをロックし、
   全出力のユーザーパスをマスクします (画面共有セッション用) —
@@ -144,12 +155,15 @@ MCP リソース (`recipe://<category>/<name>`) としても公開されます�
 ## 既知の問題
 
 - `vrc_avatar_audit` の `textureMegabytes` はレンダラーから到達できる
-  テクスチャのみを数えます。アニメーションクリップやビルド時生成
-  (Modular Avatar の差し替え等) からのみ参照されるテクスチャは含まれません —
-  実測した 1 体では実合計の約 8% が見えていませんでした。上限付近では
-  下限値として扱ってください。
-- Unity 6 は未検証です (VRChat は現在 2022.3。eval ツールチェーンのプローブは
-  誤動作せず明示的に失敗します)。
+  テクスチャのみ (下限値)。補完として `textureMegabytesAnimOnly` が
+  アニメーションの ObjectReference カーブ経由のみで届くテクスチャ
+  (Modular Avatar のマテリアル差し替え等) を合算します。この補完値は
+  **未ベイクのアバターでは常に 0** です (MA の差し替えは NDMF ビルド時に
+  初めてカーブになる) — `ndmf_bake_run` を実行し、返ってきた
+  `outputPrefabPath` をそのまま監査してください (audit は資産パスを直接
+  受け付けます)。
+- Unity 6 は対象外です (VRChat がエディタバージョンを固定。eval ツール
+  チェーンのプローブは誤動作せず明示的に失敗します)。
 - 一部レシピの front matter は `params:` の宣言が不足しています。eval 層が
   空の `args` をスタブするのでレシピは動作し、必要なフィールドを自己申告します
   (上のレシピ段落参照)。
