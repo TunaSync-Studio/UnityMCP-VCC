@@ -1,0 +1,33 @@
+# Server-side CI: typecheck + unit tests (mock-plugin TCP included) + bundle
+# build + metadata smoke, on both OSes users actually run the npm server on.
+# Unity EditMode tests need a licensed editor and stay a local release gate
+# (docs/SMOKE_TEST_PROTOCOL.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - run: npm run build
+      - run: node test/smoke-metadata-bundle.mjs
