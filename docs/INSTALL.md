@@ -99,7 +99,7 @@ paths. The default output omits those details and never prints registry tokens.
    `Tools > TunaSync Unity MCP > Creator Console` if curious).
 2. Talk to your AI. `unity_health_check` confirms the link; from there:
    `execute_editor_command` (run C# in the editor), `get_editor_state`,
-   `scene_query`, `camera_capture`, `find_recipe` (400+ ready-made
+   `scene_query`, `camera_capture`, `find_recipe` (412 ready-made
    editor operations), and for VRChat projects `vrc_avatar_audit`,
    `ndmf_bake_run`, `vrc_upload {dry_run:true}`.
 

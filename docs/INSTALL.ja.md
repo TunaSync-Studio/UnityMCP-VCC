@@ -98,7 +98,7 @@ npx -y tunasync-unity-mcp doctor
    `Tools > TunaSync Unity MCP > Creator Console`)。
 2. AI に話しかけるだけ。`unity_health_check` で接続確認。以降:
    `execute_editor_command` (エディタ内で C# 実行)、`get_editor_state`、
-   `scene_query`、`camera_capture`、`find_recipe` (400+ の既製エディタ操作)、
+   `scene_query`、`camera_capture`、`find_recipe` (412 本の既製エディタ操作)、
    VRChat プロジェクトなら `vrc_avatar_audit`、`ndmf_bake_run`、
    `vrc_upload {dry_run:true}`。
 3. **エディタを起動していなくても** `vcc_project` (プロジェクト一覧・
