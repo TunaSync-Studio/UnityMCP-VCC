@@ -1,4 +1,4 @@
-// MCP tool surface (P3: final 13 tools). Tools are declared in a small table
+// MCP tool surface (18 tools as of v2.6.0). Tools are declared in a small table
 // so later phases can append entries without touching the registration
 // plumbing. Every handler is wrapped: UnityClient errors become
 // "[CODE] message" content plus a structured detail JSON block - a tool never
@@ -465,7 +465,7 @@ function tool<S extends z.ZodRawShape>(
   };
 }
 
-// ---- tool table (15: 13 editor tools + the editorless VCC/VPM pair) ----
+// ---- tool table (18: 16 editor tools + the editorless VCC/VPM pair) ----
 
 const toolTable: readonly ToolRegistrar[] = [
   tool(
