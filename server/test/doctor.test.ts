@@ -56,6 +56,15 @@ describe("doctor", () => {
     expect(report.checks.find((check) => check.id === "unity")?.status).toBe("warn");
   });
 
+  it("checks the engines floor (>=20.19), not just the major", async () => {
+    const status = async (nodeVersion: string): Promise<string | undefined> =>
+      (await buildDoctorReport(deps({ nodeVersion }))).checks.find((c) => c.id === "node")?.status;
+    expect(await status("v20.18.3")).toBe("fail");
+    expect(await status("v20.19.0")).toBe("pass");
+    expect(await status("v21.0.0")).toBe("pass");
+    expect(await status("v24.1.0")).toBe("pass");
+  });
+
   it("fails an unsupported Node runtime", async () => {
     const report = await buildDoctorReport(deps({ nodeVersion: "v18.20.0" }));
     expect(report.ok).toBe(false);

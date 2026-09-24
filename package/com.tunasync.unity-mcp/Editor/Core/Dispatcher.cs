@@ -312,8 +312,7 @@ namespace TunaSync.UnityMCP.Editor
             foreach (InFlight inf in _inflight.Values)
             {
                 inf.CancelReason = code;
-                Resolve(inf, false, null, ErrorObj.Make(code, message, retryable));
-                SafeCancel(inf);
+                ResolveThenCancel(inf, ErrorObj.Make(code, message, retryable));
             }
         }
 
@@ -326,8 +325,7 @@ namespace TunaSync.UnityMCP.Editor
                 if (!inf.RequiresLease) continue;
                 if (!string.Equals(inf.SessionId, sessionId, StringComparison.Ordinal)) continue;
                 inf.CancelReason = error.Code;
-                Resolve(inf, false, null, error);
-                SafeCancel(inf);
+                ResolveThenCancel(inf, error);
             }
         }
 
@@ -338,8 +336,7 @@ namespace TunaSync.UnityMCP.Editor
             {
                 if (!ReferenceEquals(inf.Session, session)) continue;
                 inf.CancelReason = ErrorCodes.Cancelled;
-                Resolve(inf, false, null, ErrorObj.Make(ErrorCodes.Cancelled, "connection closed"));
-                SafeCancel(inf);
+                ResolveThenCancel(inf, ErrorObj.Make(ErrorCodes.Cancelled, "connection closed"));
             }
         }
 
@@ -364,6 +361,21 @@ namespace TunaSync.UnityMCP.Editor
             try { inf.Cts.Cancel(); }
             catch (ObjectDisposedException) { }
             catch (AggregateException) { }
+        }
+
+        /// <summary>
+        /// Answer with this exact error, THEN signal the handler's token, THEN
+        /// dispose. Resolve() used to dispose the source first, so the later
+        /// Cancel() threw ObjectDisposedException (swallowed) and never reached
+        /// the handler: an eval told CANCELLED / LEASE_LOST still compiled and
+        /// ran its code after the lease moved or the operator stopped the
+        /// bridge. OnTokenFired's own Resolve is a no-op here (already resolved).
+        /// </summary>
+        private static void ResolveThenCancel(InFlight inf, ErrorObj error)
+        {
+            Resolve(inf, false, null, error, false);
+            SafeCancel(inf);
+            try { inf.Cts.Dispose(); } catch { }
         }
 
         /// <summary>Deadline / cancel callback. May run on a timer or transport thread; no Unity API.</summary>
@@ -440,7 +452,7 @@ namespace TunaSync.UnityMCP.Editor
         }
 
         /// <summary>Single resolution point; exactly one res per req id. Safe from any thread.</summary>
-        private static void Resolve(InFlight inf, bool ok, object result, ErrorObj error)
+        private static void Resolve(InFlight inf, bool ok, object result, ErrorObj error, bool disposeCts = true)
         {
             if (Interlocked.Exchange(ref inf.Resolved, 1) != 0) return;
             InFlight removed;
@@ -451,7 +463,10 @@ namespace TunaSync.UnityMCP.Editor
                 inf.Session.Send(ok ? Frames.Res(inf.ReqId, result) : Frames.ResError(inf.ReqId, error));
             }
             catch { }
-            try { inf.Cts.Dispose(); } catch { }
+            if (disposeCts)
+            {
+                try { inf.Cts.Dispose(); } catch { }
+            }
         }
 
         private static string FirstStackLine(Exception ex)

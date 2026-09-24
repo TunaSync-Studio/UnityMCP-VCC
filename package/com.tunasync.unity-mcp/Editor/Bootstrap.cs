@@ -26,7 +26,7 @@ namespace TunaSync.UnityMCP.Editor
     /// </summary>
     public static class McpEditorInfo
     {
-        public const string PluginVersion = "2.6.8";
+        public const string PluginVersion = "2.6.9";
 
         private const string SessionIdKey = "TunaSync.UnityMCP.SessionId.v1";
         private const string ReloadCountKey = "TunaSync.UnityMCP.ReloadCount.v1";
@@ -289,7 +289,7 @@ namespace TunaSync.UnityMCP.Editor
             if (!string.IsNullOrEmpty(holder)) LeaseManager.Release(holder);
 
             TcpHost host = TcpHost.Current;
-            if (host != null) host.StopWithBye(reason ?? "disabled", null, 250);
+            if (host != null) host.StopWithBye(reason ?? "shutdown", null, 250);
             PortRegistry.DeleteNow();
             _started = false;
             return cancelled;

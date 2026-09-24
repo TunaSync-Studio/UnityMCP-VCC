@@ -169,7 +169,7 @@ namespace TunaSync.UnityMCP.Editor
             await CompileGate.AwaitIdleAsync(ct); // resumes on main; bounded by request deadline via ct
 
             EvalEnv env = EvalEnv.CaptureOnMain();
-            string key = ComputeKey(source);
+            string key = ComputeKey(source, env);
             bool healed = false;
 
             while (true)
@@ -217,6 +217,12 @@ namespace TunaSync.UnityMCP.Editor
                     throw new McpHandlerException(ErrorCodes.EvalRuntimeError,
                         "eval assembly type scan failed: " + ex.Message);
                 }
+
+                // Cancellation (client cancel, lease takeover, closed session,
+                // deadline) can land while csc runs or while this continuation
+                // waits for the main thread: never start user code for a
+                // request that has already been answered.
+                ct.ThrowIfCancellationRequested();
 
                 LogCapture.LogScope scope = captureLogs ? LogCapture.BeginScope() : null;
                 Stopwatch sw = Stopwatch.StartNew();
@@ -377,11 +383,18 @@ namespace TunaSync.UnityMCP.Editor
                 || ex is BadImageFormatException;
         }
 
-        private static string ComputeKey(string code)
+        private static string ComputeKey(string code, EvalEnv env)
         {
+            // The compile defines are part of what the dll IS: without them a
+            // snippet with #if UNITY_ANDROID (or a scripting define symbol)
+            // reused the dll built for the previous build target / define set
+            // and silently ran the other branch after a PC <-> Quest switch.
+            string[] defines = env != null && env.Defines != null ? (string[])env.Defines.Clone() : new string[0];
+            Array.Sort(defines, StringComparer.Ordinal);
             using (SHA256 sha = SHA256.Create())
             {
-                string material = code + "\n" + McpEditorInfo.UnityVersion + "\n" + McpEditorInfo.PluginVersion;
+                string material = code + "\n" + McpEditorInfo.UnityVersion + "\n" + McpEditorInfo.PluginVersion +
+                                  "\n" + string.Join(";", defines);
                 byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(material));
                 StringBuilder sb = new StringBuilder(16);
                 for (int i = 0; i < 8; i++) sb.Append(hash[i].ToString("x2"));
@@ -434,6 +447,11 @@ namespace TunaSync.UnityMCP.Editor
 
         private static void OnSerializeError(object sender, Newtonsoft.Json.Serialization.ErrorEventArgs e)
         {
+            // The result cap must abort the whole serialization. Marking it
+            // handled like a throwing Unity property let Newtonsoft swallow it
+            // per member/root, so SerializeCapped never saw it: an oversized
+            // result came back uncapped, unterminated and without truncated.
+            if (e.ErrorContext.Error is CapExceededException) return;
             e.ErrorContext.Handled = true;
         }
 

@@ -14,9 +14,12 @@ import { RecipeLibrary } from "../src/recipes.js";
 import { ProjectPool } from "../src/unity/pool.js";
 import {
   VrcGetTimeoutError,
+  closeProcessGracefully,
   defaultRunner,
+  findVrcGet,
   listProjects,
   projectInfo,
+  resetVrcGetCache,
   vpmActionSpec,
 } from "../src/vcc.js";
 import type { VrcGetResult } from "../src/vcc.js";
@@ -102,6 +105,44 @@ describe("vcc file reads", () => {
   });
 });
 
+describe("closeProcessGracefully", () => {
+  // taskkill only exists on Windows; quit used to be impossible elsewhere.
+  it.skipIf(process.platform === "win32")("sends SIGTERM off Windows", async () => {
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    const exited = new Promise<NodeJS.Signals | null>((r) => child.on("exit", (_c, sig) => r(sig)));
+    try {
+      const res = closeProcessGracefully(child.pid ?? -1);
+      expect(res.requested).toBe(true);
+      expect(await exited).toBe("SIGTERM");
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+  });
+});
+
+describe("findVrcGet", () => {
+  it("finds vrc-get installed after a miss without a server restart", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-vrcget-"));
+    const savedPath = process.env.PATH;
+    resetVrcGetCache();
+    try {
+      process.env.PATH = tmp;
+      expect(findVrcGet()).toBeNull(); // the install hint says: install, then retry
+      const exe = path.join(tmp, process.platform === "win32" ? "vrc-get.exe" : "vrc-get");
+      fs.writeFileSync(exe, "");
+      fs.chmodSync(exe, 0o755);
+      expect(findVrcGet()).toBe(exe);
+    } finally {
+      process.env.PATH = savedPath;
+      resetVrcGetCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("vpmActionSpec", () => {
   it("maps actions to vrc-get argv", () => {
     expect(vpmActionSpec("repos", {}).args).toEqual(["repo", "list"]);
@@ -111,6 +152,21 @@ describe("vpmActionSpec", () => {
       write: true,
     });
     expect(vpmActionSpec("outdated", { project: "P" }).json).toBe(true);
+  });
+
+  it("rejects flag-like values for every argv slot (L-2), incl. upgrade's package", () => {
+    expect(() => vpmActionSpec("add", { project: "P", package: "--evil" })).toThrow(/may not start/);
+    expect(() => vpmActionSpec("upgrade", { project: "P", package: "--project=C:/other" })).toThrow(
+      /'package' may not start with '-'/,
+    );
+    expect(() => vpmActionSpec("upgrade", { project: "-P" })).toThrow(/'project' may not start/);
+    expect(vpmActionSpec("upgrade", { project: "P", package: "com.x" }).args).toEqual([
+      "upgrade",
+      "--project",
+      "P",
+      "com.x",
+      "-y",
+    ]);
   });
 
   it("throws on missing params and unknown actions", () => {
@@ -333,6 +389,25 @@ describe("vpm_manage over MCP (injected runner)", () => {
       delete process.env.UNITY_MCP_VCC_SETTINGS;
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("create rejects flag-like project/packages before touching anything", async () => {
+    const h = await setup();
+    const argvLog: string[][] = [];
+    setVpmRunner(async (argv): Promise<VrcGetResult> => {
+      argvLog.push(argv);
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    const res = await h.callTool("vpm_manage", {
+      action: "create",
+      project: path.join(os.tmpdir(), "unitymcp-never-created"),
+      packages: ["--prerelease"],
+    });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("INVALID_PARAMS");
+    expect(textOf(res)).toContain("packages[]");
+    expect(argvLog).toEqual([]);
+    expect(fs.existsSync(path.join(os.tmpdir(), "unitymcp-never-created"))).toBe(false);
   });
 
   it("create with an unknown template lists the available ones", async () => {

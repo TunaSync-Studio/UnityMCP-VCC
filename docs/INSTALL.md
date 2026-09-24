@@ -7,7 +7,7 @@ Two pieces: a Unity **package** (in your project) and a tiny **MCP server**
 repository entry, plus a one-time consent click in the editor.
 
 > **Requirements / status**: Windows, Unity **2022.3** (verified on
-> 2022.3.22f1), Node.js 20+. This tool lets an AI run arbitrary C# in your
+> 2022.3.22f1), Node.js 20.19+. This tool lets an AI run arbitrary C# in your
 > editor — use it on projects under version control. Real `vrc_upload`
 > publishing is double-gated: `confirm:true` **plus** a human-created
 > one-shot arm file (`tools/arm-vrc-upload.bat`); `dry_run` and the real
@@ -51,7 +51,7 @@ with the editor.
 
 ## 2. MCP server (your AI client)
 
-Requires Node.js 20+.
+Requires Node.js 20.19+.
 
 **Claude Code**
 
@@ -143,9 +143,12 @@ Create the marker file yourself:
 New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 ```
 
-It expires after 30 minutes and is consumed by the next real upload
-attempt. Never let the AI create it — the whole point is that a human
-touched the button.
+It expires after 30 minutes and is consumed when the next real upload
+attempt ends (the plugin re-checks it when the upload job starts, so it
+stays in place while that attempt runs). Never let the AI create it — the
+whole point is that a human touched the button. If you override its
+location with `UNITY_MCP_ARM_FILE`, set the same value for the Unity editor
+process too.
 
 ## 日本語版
 
@@ -156,6 +159,6 @@ touched the button.
    初回起動時のダイアログで **Enable** を1回押す (それ以降は全自動)。
 2. **AI側**: `codex mcp add unity-mcp -- npx -y tunasync-unity-mcp`
    または `claude mcp add unity-mcp -- npx -y tunasync-unity-mcp`
-   (Node.js 20+ が必要)。
+   (Node.js 20.19+ が必要)。
 3. Unityでプロジェクトを開いて、AIに話しかけるだけ。接続確認は
    `Tools > TunaSync Unity MCP > Creator Console` (接続process・job・compile診断も表示)。

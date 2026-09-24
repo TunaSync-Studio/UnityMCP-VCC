@@ -61,7 +61,9 @@ namespace TunaSync.UnityMCP.Editor
                     "Presence of this file disables TunaSync Unity MCP" +
                     " (no listener, no registry). Delete it to re-enable.\n");
             }
-            int cancelled = Bootstrap.StopServices("disabled_by_operator", true);
+            // PROTOCOL.md bye reasons are domain_reload|quit|shutdown; anything
+            // else read as an unexpected close (30 s reconnect grace) server-side.
+            int cancelled = Bootstrap.StopServices("shutdown", true);
             Debug.Log("[UnityMCP] disabled immediately; listener and registry stopped" +
                       (cancelled > 0 ? ", jobs signalled=" + cancelled : "") + ".");
             return cancelled;

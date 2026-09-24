@@ -78,12 +78,8 @@ namespace TunaSync.UnityMCP.Editor
 
             try
             {
-                // Long synchronous main-thread call by design (real bakes are heavy;
-                // ping/sys.status stay answerable on the transport thread).
-                ctx.Report(25, "running NDMF processing", "process");
-                process.Invoke(null, new object[] { clone });
-
-                ctx.Report(75, "saving baked prefab", "save");
+                // The destination is validated BEFORE the (long) bake: it is
+                // also where NDMF now writes the generated assets (below).
                 if (string.IsNullOrEmpty(outputDir))
                 {
                     outputDir = "Assets/UnityMCP_Bakes/" + sanitizedBase + "_" +
@@ -101,7 +97,21 @@ namespace TunaSync.UnityMCP.Editor
                         "without '..' (got '" + outputDir + "')");
                 }
                 EnsureAssetFolder(outputDir);
+                // Unique per bake: NDMF deletes <root>/<avatar name> when it
+                // exists, so a reused root would break the previous bake.
+                string generatedRoot = AssetDatabase.GenerateUniqueAssetPath(outputDir + "/Generated");
 
+                // Long synchronous main-thread call by design (real bakes are heavy;
+                // ping/sys.status stay answerable on the transport thread).
+                ctx.Report(25, "running NDMF processing", "process");
+                bool generatedRedirected;
+                using (IDisposable scope = OverrideGeneratedAssetsRoot(generatedRoot))
+                {
+                    generatedRedirected = scope != null;
+                    process.Invoke(null, new object[] { clone });
+                }
+
+                ctx.Report(75, "saving baked prefab", "save");
                 string prefabPath = AssetDatabase.GenerateUniqueAssetPath(
                     outputDir + "/" + clone.name + ".prefab");
                 GameObject saved = PrefabUtility.SaveAsPrefabAsset(clone, prefabPath);
@@ -119,6 +129,8 @@ namespace TunaSync.UnityMCP.Editor
                 return Task.FromResult<object>(new
                 {
                     outputPrefabPath = prefabPath,
+                    // Meshes/materials/controllers the prefab references.
+                    generatedAssetsPath = generatedRedirected ? generatedRoot : null,
                     stats = new { gameObjects, meshes },
                 });
             }
@@ -140,6 +152,31 @@ namespace TunaSync.UnityMCP.Editor
             => throw new NotSupportedException("ndmf.bake does not resume");
 
         // ---- internals ------------------------------------------------------
+
+        /// <summary>
+        /// AvatarProcessor.ProcessAvatar(GameObject) saves the generated assets
+        /// (meshes, materials, animator controllers) under NDMF's TEMPORARY
+        /// root, Packages/nadena.dev.ndmf/__Generated, which NDMF wipes after
+        /// every VRChat avatar build and per avatar name on the next bake -
+        /// leaving earlier baked prefabs with missing references. The public
+        /// OverrideTemporaryDirectoryScope (NDMF 0.1+) redirects generation next
+        /// to the baked prefab. Null (old behavior) when it cannot be created.
+        /// </summary>
+        private static IDisposable OverrideGeneratedAssetsRoot(string assetRoot)
+        {
+            Type scopeType = HandlerUtil.FindType("nadena.dev.ndmf.OverrideTemporaryDirectoryScope");
+            if (scopeType == null) return null;
+            try
+            {
+                return Activator.CreateInstance(scopeType, new object[] { assetRoot }) as IDisposable;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[UnityMCP] ndmf.bake: could not redirect NDMF generated assets (" +
+                                 ex.Message + "); they stay in NDMF's temporary folder.");
+                return null;
+            }
+        }
 
         private static MethodInfo FindProcessMethod()
         {

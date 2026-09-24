@@ -39,9 +39,17 @@ export interface DoctorDeps {
   now: () => Date;
 }
 
-function majorOf(version: string): number {
-  const major = Number(version.replace(/^v/, "").split(".")[0]);
-  return Number.isFinite(major) ? major : 0;
+/** package.json engines ">=20.19" - keep in lockstep. */
+const NODE_MIN: readonly [number, number] = [20, 19];
+
+function nodeSatisfiesMin(version: string): boolean {
+  const [major, minor] = version
+    .replace(/^v/, "")
+    .split(".")
+    .map((part) => Number(part));
+  if (major === undefined || !Number.isFinite(major)) return false;
+  if (major !== NODE_MIN[0]) return major > NODE_MIN[0];
+  return minor !== undefined && Number.isFinite(minor) && minor >= NODE_MIN[1];
 }
 
 export async function buildDoctorReport(
@@ -51,14 +59,14 @@ export async function buildDoctorReport(
   const checks: DoctorCheck[] = [];
   const verbose = options.verbose === true;
 
-  const nodeMajor = majorOf(deps.nodeVersion);
+  const nodeOk = nodeSatisfiesMin(deps.nodeVersion);
+  const nodeMin = `${NODE_MIN[0]}.${NODE_MIN[1]}`;
   checks.push({
     id: "node",
-    status: nodeMajor >= 20 ? "pass" : "fail",
-    message:
-      nodeMajor >= 20
-        ? `Node ${deps.nodeVersion} satisfies the >=20 requirement.`
-        : `Node ${deps.nodeVersion} is unsupported; install Node 20 or newer.`,
+    status: nodeOk ? "pass" : "fail",
+    message: nodeOk
+      ? `Node ${deps.nodeVersion} satisfies the >=${nodeMin} requirement.`
+      : `Node ${deps.nodeVersion} is unsupported; install Node ${nodeMin} or newer.`,
   });
 
   checks.push({

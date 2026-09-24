@@ -12,12 +12,20 @@ repository or any published artifact.
 
 ## Bundled third-party code (npm package)
 
-The published npm bundle (`build/index.js`) statically includes:
+The published npm bundle (`build/index.js`) statically includes the
+packages below. Their full license texts ship next to it in
+`build/THIRD_PARTY_LICENSES.txt`, which the build generates from the
+bundle's actual inputs (so the list cannot drift from what is bundled):
 
 - [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)
-  — MIT License, Copyright (c) 2024 Anthropic, PBC.
-- [zod](https://github.com/colinhacks/zod) — MIT License,
-  Copyright (c) 2020 Colin McDonnell.
-
-Their license texts are of the same MIT form as `LICENSE`; original
-notices are preserved in the packages' repositories linked above.
+  — MIT, Copyright (c) 2024 Anthropic, PBC.
+- [zod](https://github.com/colinhacks/zod) — MIT, Copyright (c) 2025 Colin McDonnell.
+- [zod-to-json-schema](https://github.com/StefanTerdell/zod-to-json-schema)
+  — ISC, Copyright (c) 2020 Stefan Terdell.
+- [ajv](https://github.com/ajv-validator/ajv),
+  [ajv-formats](https://github.com/ajv-validator/ajv-formats),
+  [fast-deep-equal](https://github.com/epoberezkin/fast-deep-equal),
+  [json-schema-traverse](https://github.com/epoberezkin/json-schema-traverse)
+  — MIT, Copyright (c) Evgeny Poberezkin.
+- [fast-uri](https://github.com/fastify/fast-uri) — BSD-3-Clause,
+  Copyright (c) 2011-2021 Gary Court, (c) 2021-present The Fastify team.

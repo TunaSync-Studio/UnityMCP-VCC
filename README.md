@@ -9,6 +9,9 @@ Ground-up rewrite (2026-08); the legacy 426-tool fork lineage is kept on the
 development repository's `legacy-v1` branch (tag `v1-final`) and is not part
 of this release tree.
 
+> Unofficial community tool. Not affiliated with VRChat Inc. or Unity
+> Technologies.
+
 ## Quickstart
 
 **1 — Unity side (VCC):** add this repository ([one-click page](https://tunasync-studio.github.io/UnityMCP-VCC/)) and install **TunaSync Unity MCP** into your project:
@@ -56,8 +59,9 @@ package/com.tunasync.unity-mcp  (Editor-only VPM/UPM package)
    toolchain - zero bundled DLLs)
 ```
 
-- The plugin is the listener → any number of MCP client processes connect
-  concurrently; no port fights, no ghost sockets. (Live-verified 2026-08-07:
+- The plugin is the listener → many MCP client processes connect
+  concurrently (up to 16 connections per editor since 2.6.8); no port
+  fights, no ghost sockets. (Live-verified 2026-08-07:
   3 simultaneous clients on one plugin, two editors driven side by side,
   per-project leases stolen across clients both ways, and one editor frozen
   for 140 s while the other kept answering.)
@@ -148,14 +152,18 @@ rest; recipes are also exposed as MCP resources
   path are both verified live on a real avatar project (2026-08-06); the
   world `dry_run` path is verified live on a published world (2026-08-07).
   A real upload is double-gated — `confirm:true` (caller intent) **and** a
-  human-created one-shot arm file (TTL 30 min, atomically consumed per
-  attempt) — and since v2.6.7 the arm file is checked **inside the editor
-  plugin too**, so even a client that bypasses this server cannot publish
-  unattended. Arming without a repo checkout: see
-  `docs/INSTALL.md` § "Arming a real VRChat upload".
-- **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks the destructive /
-  publishing tools and masks user paths in all output for screen-shared
-  sessions — `docs/STREAMING.md`.
+  human-created one-shot arm file (TTL 30 min, one attempt per arm) — and
+  since v2.6.7 the arm file is checked **inside the editor plugin too**, so
+  even a client that bypasses this server cannot publish unattended.
+  Arming without a repo checkout: see `docs/INSTALL.md` § "Arming a real
+  VRChat upload". Note: the 2.6.7/2.6.8 npm servers consumed the arm file
+  before that plugin-side check ran, so every real upload was refused
+  ("arm file not found"); fixed in 2.6.9 — the arm now stays in place
+  until the attempt ends. The real publish path has not been re-fired live
+  since the fix.
+- **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks the project-writing /
+  publishing tools and masks user paths in tool and recipe-resource output
+  for screen-shared sessions — `docs/STREAMING.md`.
 - **NDMF bake** writes a baked prefab under `Assets/UnityMCP_Bakes/`; it does
   not touch your source avatar.
 

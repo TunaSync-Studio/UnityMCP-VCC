@@ -90,6 +90,12 @@ export interface MockPluginOptions {
   handlers?: Record<string, MockHandler>;
   /** Behavior of the built-in job engine, keyed by submitted job method. */
   jobBehaviors?: Record<string, MockJobBehavior>;
+  /**
+   * Plugin fidelity (VrcUploadExecutor.ThrowIfNotArmed, 2.6.7+): when set, a
+   * REAL vrc.upload job re-reads this arm file when it starts and fails with
+   * INVALID_PARAMS if it is gone.
+   */
+  armFile?: string;
 }
 
 interface InFlight {
@@ -123,7 +129,9 @@ export class MockPlugin {
     hellos: HelloPayload[];
     reqs: Array<{ id: string; method: string; params: unknown }>;
     cancels: CancelPayload[];
-  } = { hellos: [], reqs: [], cancels: [] };
+    /** One entry per real vrc.upload job start: was the arm file present? */
+    armChecks: boolean[];
+  } = { hellos: [], reqs: [], cancels: [], armChecks: [] };
 
   constructor(private readonly opts: MockPluginOptions = {}) {
     this.projectPath = opts.projectPath ?? "C:/Test/MockProject";
@@ -209,6 +217,20 @@ export class MockPlugin {
       });
     }, resumeMs);
     this.rebindTimer.unref?.();
+  }
+
+  /**
+   * Say bye with an arbitrary reason and hang up, leaving the registry entry
+   * in place (the listener stays closed).
+   */
+  async sayByeAndClose(reason: string): Promise<void> {
+    const bye: Envelope = { id: randomUUID(), type: "bye", payload: { reason } };
+    for (const c of this.conns) {
+      this.writeTo(c.socket, bye);
+      c.socket.end();
+    }
+    this.conns.clear();
+    await this.closeListener();
   }
 
   /** Change the enforced token at runtime (token rotation tests). */
@@ -566,6 +588,11 @@ export class MockPlugin {
         if (job === undefined) {
           throw new MockPluginError("JOB_NOT_FOUND", `no job ${jobId}`);
         }
+        const armFailure = this.checkUploadArm(job);
+        if (armFailure !== null) {
+          job.state = "failed";
+          return { jobId, method: job.method, state: "failed", error: armFailure };
+        }
         const behavior = this.opts.jobBehaviors?.[job.method] ?? {};
         if (behavior.neverComplete === true) {
           const waitMs = typeof p.timeoutMs === "number" ? p.timeoutMs : 60_000;
@@ -621,6 +648,27 @@ export class MockPlugin {
       default:
         return METHOD_NOT_FOUND_SENTINEL;
     }
+  }
+
+  /** The mock job "starts" on job.wait: mirror the plugin's arm re-check there. */
+  private checkUploadArm(job: MockJob): ErrorObj | null {
+    const armFile = this.opts.armFile;
+    if (armFile === undefined || job.method !== "vrc.upload" || job.state !== "pending") return null;
+    const p = (typeof job.params === "object" && job.params !== null ? job.params : {}) as Record<
+      string,
+      unknown
+    >;
+    if (p.dryRun !== false) return null;
+    const present = fs.existsSync(armFile);
+    this.received.armChecks.push(present);
+    if (present) return null;
+    return {
+      code: "INVALID_PARAMS",
+      message:
+        "vrc.upload: a real upload additionally requires the human-created one-shot arm file " +
+        `(${armFile}; arm file not found)`,
+      retryable: false,
+    };
   }
 
   private welcomePayloadBase(): Omit<WelcomePayload, "v"> {

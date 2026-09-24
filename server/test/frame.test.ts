@@ -1,6 +1,6 @@
 // FrameEncoder/FrameDecoder: split, coalesced, jumbo and garbage streams.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FrameDecoder, FrameError, HEADER_BYTES, encodeFrame } from "../src/transport/frame.js";
 import { MAX_FRAME_BYTES, type Envelope } from "../src/protocol.js";
 
@@ -106,6 +106,43 @@ describe("FrameDecoder", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]?.kind).toBe("parse");
     expect(decoder.dead).toBe(true);
+  });
+
+  it("reassembles a large chunked frame with one join, not one per chunk", () => {
+    // 4 MiB body over 64 KiB socket chunks: the old decoder re-concatenated
+    // the whole backlog per chunk (quadratic; 60 MiB took ~15 s -> TIMEOUT).
+    const e = env("big", { blob: "x".repeat(4 * 1024 * 1024) });
+    const buf = encodeFrame(e);
+    const { frames, errors, decoder } = collect();
+    const concat = vi.spyOn(Buffer, "concat");
+    try {
+      for (let off = 0; off < buf.length; off += 64 * 1024) {
+        decoder.push(buf.subarray(off, off + 64 * 1024));
+      }
+      expect(concat.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally {
+      concat.mockRestore();
+    }
+    expect(errors).toHaveLength(0);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toEqual(e);
+  });
+
+  it("keeps order when onFrame re-enters push", () => {
+    const es = [env("r1"), env("r2"), env("r3")];
+    const bufs = es.map(encodeFrame);
+    const frames: Envelope[] = [];
+    const decoder: FrameDecoder = new FrameDecoder({
+      onFrame: (f) => {
+        frames.push(f);
+        if (f.id === "r1") decoder.push(bufs[2] as Buffer); // arrives while r2 is still buffered
+      },
+      onError: (err) => {
+        throw err;
+      },
+    });
+    decoder.push(Buffer.concat([bufs[0] as Buffer, bufs[1] as Buffer]));
+    expect(frames.map((f) => f.id)).toEqual(["r1", "r2", "r3"]);
   });
 
   it("goes fatally dead on valid JSON that is not an envelope", () => {

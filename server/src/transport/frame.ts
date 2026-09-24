@@ -49,9 +49,17 @@ function isEnvelope(x: unknown): x is Envelope {
  * Streaming frame decoder. Feed arbitrary Buffer chunks (split or coalesced);
  * emits parsed envelopes in order. Any framing violation is fatal because the
  * stream offset can no longer be recovered.
+ *
+ * Pending bytes are kept as a chunk list and joined only once the next
+ * header/frame is complete: re-concatenating the whole backlog on every
+ * socket chunk was quadratic (a legal 60 MiB response took ~15 s to
+ * reassemble and surfaced as TIMEOUT although the plugin had answered).
  */
 export class FrameDecoder {
-  private buf: Buffer = Buffer.alloc(0);
+  private chunks: Buffer[] = [];
+  private buffered = 0;
+  /** Bytes required before the next parse step can make progress. */
+  private needed = HEADER_BYTES;
   private deadFlag = false;
 
   constructor(private readonly handlers: FrameDecoderHandlers) {}
@@ -61,21 +69,33 @@ export class FrameDecoder {
   }
 
   push(chunk: Buffer): void {
-    if (this.deadFlag) return;
-    this.buf = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
-    for (;;) {
-      if (this.deadFlag) return;
-      if (this.buf.length < HEADER_BYTES) return;
-      const len = this.buf.readUInt32BE(0);
+    if (this.deadFlag || chunk.length === 0) return;
+    this.chunks.push(chunk);
+    this.buffered += chunk.length;
+    // State lives on the instance before every callback, so a re-entrant
+    // push from onFrame appends in order and this loop re-checks it.
+    while (!this.deadFlag && this.buffered >= this.needed) {
+      const buf =
+        this.chunks.length === 1 && this.chunks[0] !== undefined
+          ? this.chunks[0]
+          : Buffer.concat(this.chunks, this.buffered);
+      this.chunks = [buf];
+      const len = buf.readUInt32BE(0);
       if (len > MAX_FRAME_BYTES) {
         this.fail(
           new FrameError("oversize", `frame header declares ${len} bytes, max ${MAX_FRAME_BYTES}`),
         );
         return;
       }
-      if (this.buf.length < HEADER_BYTES + len) return;
-      const body = this.buf.subarray(HEADER_BYTES, HEADER_BYTES + len);
-      this.buf = this.buf.subarray(HEADER_BYTES + len);
+      if (buf.length < HEADER_BYTES + len) {
+        this.needed = HEADER_BYTES + len;
+        return;
+      }
+      const body = buf.subarray(HEADER_BYTES, HEADER_BYTES + len);
+      const rest = buf.subarray(HEADER_BYTES + len);
+      this.chunks = rest.length > 0 ? [rest] : [];
+      this.buffered = rest.length;
+      this.needed = HEADER_BYTES;
       let parsed: unknown;
       try {
         parsed = JSON.parse(body.toString("utf8"));
@@ -95,7 +115,8 @@ export class FrameDecoder {
 
   private fail(err: FrameError): void {
     this.deadFlag = true;
-    this.buf = Buffer.alloc(0);
+    this.chunks = [];
+    this.buffered = 0;
     this.handlers.onError(err);
   }
 }

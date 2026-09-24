@@ -50,6 +50,7 @@ describe("streamLockedResult server identity", () => {
 
 interface Harness {
   mock: MockPlugin;
+  mcp: Client;
   callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResult>;
   cleanup: () => Promise<void>;
 }
@@ -75,6 +76,7 @@ async function setup(
   await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
   return {
     mock,
+    mcp,
     callTool: async (name, args) =>
       (await mcp.callTool({ name, arguments: args }, undefined, {})) as CallToolResult,
     cleanup: async () => {
@@ -176,6 +178,18 @@ describe("stream mode masking", () => {
     expect(text).not.toContain("SecretProj");
     expect(text).toContain("****");
   });
+
+  it("masks recipe resource reads too (they bypass the tool wrapper)", async () => {
+    // The unavailable-library message lists the absolute paths it probed.
+    h = await setup(["no-recipes-here"]);
+    const err = await h.mcp.readResource({ uri: "recipe://x/y" }).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(err).not.toBeNull();
+    expect(String(err?.message)).toContain("not built yet");
+    expect(String(err?.message)).not.toContain("no-recipes-here");
+  });
 });
 
 describe("maskText unit behavior", () => {
@@ -188,6 +202,22 @@ describe("maskText unit behavior", () => {
     expect(maskText("C:\\\\Users\\\\exampleuser\\\\x.txt", state)).toBe(
       "C:\\\\Users\\\\****\\\\x.txt",
     );
+  });
+
+  it("masks whole user names with spaces, any case, and POSIX home dirs", () => {
+    expect(maskText("C:\\Users\\John Smith\\Documents\\a.txt", state)).toBe(
+      "C:\\Users\\****\\Documents\\a.txt",
+    );
+    expect(maskText("C:\\Users\\田中\u3000太郎\\Unity", state)).toBe("C:\\Users\\****\\Unity");
+    expect(maskText("c:/users/alice/x", state)).toBe("c:/users/****/x");
+    expect(maskText("save to C:/Users/alice, then retry", state)).toBe(
+      "save to C:/Users/****, then retry",
+    );
+    expect(maskText("/Users/alice/Library and /home/bob/proj", state)).toBe(
+      "/Users/****/Library and /home/****/proj",
+    );
+    // Not a home dir: URL path segments are left alone.
+    expect(maskText("https://example.com/home/page", state)).toBe("https://example.com/home/page");
   });
 
   it("never touches bare words (TOKEN survives the default rules)", () => {

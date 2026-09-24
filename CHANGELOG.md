@@ -6,6 +6,100 @@ package version.
 
 ## [Unreleased]
 
+## [2.6.9] - 2026-09-24
+
+Unity plugin + npm server release: fixes from a full review of the 2.6.8
+tree. The server fixes (including the real-upload fix) work with the
+2.6.7/2.6.8 plugins too; the plugin fixes need the 2.6.9 package.
+
+### Fixed
+- **Real `vrc_upload` works again.** The 2.6.7/2.6.8 server claimed and
+  deleted the arm file *before* `job.submit`, while the plugin (2.6.7+,
+  M-1) re-checks that same file when the upload job starts - so every real
+  upload failed with "arm file not found", and re-arming could not help.
+  The arm now stays in place for the duration of the attempt and is
+  consumed when it ends; an exclusive `<arm>.lock` (O_EXCL, stale when its
+  owner process is dead or older than the TTL) keeps two concurrent calls
+  from riding one arm (L-3). An arm re-created while an attempt runs is
+  left for the next attempt, and a call that never queued an upload job
+  (a failed project resolution, or a submit the plugin refused before
+  admission such as `BUSY_MODAL` / `LEASE_HELD`) no longer burns the arm.
+  Works with the already released 2.6.7/2.6.8 plugins. The mock plugin now enforces the plugin-side re-check, which is
+  why CI never saw this.
+- **A pooled client can no longer drift to a different project.** Clients
+  are pinned to one project path, but their reconnect/rediscover fell back
+  to substring matching: with `.../milfy_neo01` and `.../milfy_neo01_jacket`
+  open, closing the first editor moved its client onto the second, and
+  later calls for the first project (evals, imports, bakes, lease) ran in
+  the other one. Pinned clients now resolve by exact path only.
+- **`get_logs` plugin fallback honors the tool contract.** `level` is a
+  minimum severity, but the plugin's `logs.get` matches it exactly
+  (`error` dropped exceptions/asserts, `debug` matched nothing), and its
+  plugin-space `lastId` poisoned a follow-up `since_id`. The fallback now
+  fetches the plugin buffer and filters locally, answers `lastId` in the
+  ring's id space, and also runs when the ring was emptied by an editor
+  session change (it used to answer `[]` forever after the first event).
+- **Large responses no longer time out in frame reassembly.** The decoder
+  re-concatenated its whole backlog per socket chunk (quadratic): a legal
+  60 MiB frame took ~15 s and surfaced as `TIMEOUT`. Now ~0.6 s.
+- **Streaming mode masks more.** Windows user names with spaces (incl.
+  U+3000) were only masked up to the first space, `c:/users/...` was not
+  matched (case), `/Users/<name>` and `/home/<name>` were never masked, and
+  `recipe://` resource reads bypassed masking entirely.
+- **The server exits when the host closes stdin** (the MCP stdio shutdown
+  sequence). With a live Unity socket it used to linger - on Windows
+  forever - keeping its write lease refreshed by pings.
+- `job.wait` failures other than a timeout (`DOMAIN_RELOAD`, a dropped
+  connection...) keep the `jobId` (message + `detail.jobId`), so a caller
+  polls the still-running job instead of submitting it again.
+- `vpm_manage`: the L-2 `-`-prefix guard now also covers `upgrade`'s
+  `package` and `create`'s `project` / `packages[]`.
+- A `bye` reason other than `domain_reload` is terminal (fail fast +
+  rediscover): the 2.6.x plugins' operator stop sent
+  `"disabled_by_operator"`, which read as an unexpected close with a 30 s
+  reconnect grace.
+- `unity_editor status` / the Library cleaner treat an elevated or
+  other-user editor (EPERM) as alive (two inline checks bypassed M-5's
+  single `pidAlive`).
+- `unity_editor quit` works on macOS/Linux (SIGTERM / SIGKILL instead of
+  the Windows-only `taskkill`).
+- `find_recipe` honors `names_only` on an exact name match.
+- A vrc-get lookup miss is no longer cached, so "install vrc-get, then
+  retry" works without restarting the server.
+- `doctor` checks the real engines floor (Node >= 20.19, was any 20.x).
+- Plugin: in-flight requests failed in bulk (lease takeover, closed
+  session, operator stop, domain reload) now really cancel the handler's
+  token - `Resolve()` disposed the source before `Cancel()`, so an eval told
+  `CANCELLED` / `LEASE_LOST` still compiled and ran its code afterwards. The
+  eval also re-checks cancellation right before invoking user code.
+- Plugin: the 256 KB eval result cap works - the serializer's error
+  handler also swallowed the cap exception, so oversized results came back
+  uncapped, unterminated and without `truncated`.
+- Plugin: the eval compile cache key includes the compile defines, so a
+  `#if UNITY_ANDROID` snippet is not served the PC-target dll after a
+  PC <-> Quest switch.
+- Plugin: `ndmf.bake` redirects NDMF's generated assets (meshes,
+  materials, controllers) to `<outputDir>/Generated` via NDMF's public
+  `OverrideTemporaryDirectoryScope`. They used to live in NDMF's temporary
+  folder, which NDMF wipes after every VRChat avatar build and per avatar
+  name on the next bake - silently breaking earlier baked prefabs. The
+  result carries `generatedAssetsPath`; `outputDir` is validated before the
+  bake instead of after it.
+- Plugin: the operator stop sends the protocol's `bye {reason:"shutdown"}`.
+- Plugin: the registry sweep no longer deletes a live sibling editor's
+  entry when that file is momentarily locked (sharing violation).
+- Documentation: PROTOCOL.md (health body without `projectPath`, VCC error
+  codes, tool-level refusals, `editor.wake` / `logs.clear`, bye semantics),
+  Node 20.19 everywhere, the npm README's platform statement and arm-env
+  notes (the plugin reads `UNITY_MCP_ARM_FILE` / `_TTL_MIN` from the
+  editor's environment), the 16-connection cap, the missing 2.6.6 heading.
+
+### Added
+- The npm package ships `build/THIRD_PARTY_LICENSES.txt`, generated from
+  the bundle's actual inputs (ajv, ajv-formats, fast-uri (BSD-3-Clause),
+  zod-to-json-schema (ISC), ... were bundled without their notices), and
+  both NOTICE files list them.
+
 ## [2.6.8] - 2026-08-12
 
 Unity plugin + npm server release: the audit's remaining actionable
@@ -99,6 +193,8 @@ distribution verification on a clean machine).
   18 tools. Headless EditMode instructions documented (`-quit`
   silently skips `-runTests`). `engines.node` raised to `>=20.19` to
   match the toolchain.
+
+## [2.6.6] - 2026-08-11
 
 npm server + Unity package.
 

@@ -61,8 +61,10 @@ dialog.
 Max frame 64 MiB. If the first 4 bytes of a new connection are `GET `,
 `HEAD`, `POST` or `OPTI`, the plugin switches to one-shot HTTP mode:
 respond `HTTP/1.1 200` with a JSON body
-`{status:"ok", projectPath, projectName, unityVersion, pluginVersion,
-protocolV, compiling, clients, jobs, evalEngine}`, drain the rest of the
+`{status:"ok", projectName, unityVersion, pluginVersion,
+protocolV, compiling, clients, jobs, evalEngine}` (no `projectPath` since
+2.6.8: the endpoint is unauthenticated and the path embeds the OS user
+name), drain the rest of the
 request, and close. This is a health snapshot only — there is no HTTP RPC
 transport; all real traffic is the framed protocol.
 
@@ -91,7 +93,7 @@ transport; all real traffic is the framed protocol.
 | `cancel` | C→P | `{targetId}` — acked by its own `res {found:bool}`; the target later resolves `CANCELLED` (or completes if it raced) |
 | `ping` | C→P | `{}` — answered on the transport thread even during compile/modal |
 | `pong` | P→C | `{}` (res-style: echoes ping id) |
-| `bye` | P→C | `{reason:"domain_reload"\|"quit"\|"shutdown", resumeHintMs?}` — last frame before close |
+| `bye` | P→C | `{reason:"domain_reload"\|"quit"\|"shutdown", resumeHintMs?}` — last frame before close. Only `domain_reload` promises a comeback; clients treat any other reason as terminal (plugins ≤ 2.6.8 sent `"disabled_by_operator"` on an operator stop) |
 
 Event kinds: `log`, `compile.started`, `compile.finished`,
 `reload.imminent`, `playmode.changed`, `job.progress`, `job.terminal`,
@@ -144,7 +146,12 @@ unless `allowPlayMode:true` — play-mode scene edits revert on exit while
 asset changes persist.
 
 Server-synthesized: `UNITY_UNREACHABLE, PROJECT_NOT_FOUND,
-PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
+PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`; VCC/VPM layer (server-local, no
+plugin involved): `VRC_GET_NOT_FOUND, VRC_GET_FAILED`.
+
+MCP tool-level refusals that never cross the wire (not `ErrorCode`s):
+`CONFIRM_REQUIRED` / `ARM_REQUIRED` (`vrc_upload` gates) and
+`STREAM_MODE_LOCKED` (streaming mode).
 
 ## Methods (P1/P2 infra surface)
 
@@ -163,8 +170,13 @@ PROJECT_AMBIGUOUS, RECONNECT_TIMEOUT`.
 | `job.cancel` | `{jobId}` |
 
 Product tools (P3) add `scene.query`, `state.get`, `logs.get`,
-`camera.capture`, `asset.importPackage`, `vrc.*` (incl. `vrc.menuTree` /
-`vrc.menuAudit`), `ndmf.*` — same envelope rules.
+`logs.clear`, `camera.capture`, `editor.wake`, `asset.importPackage`,
+`vrc.*` (incl. `vrc.menuTree` / `vrc.menuAudit`), `ndmf.*` — same envelope
+rules. `logs.get` `{level?, regex?, count?, sinceId?}` matches `level`
+exactly and answers plugin-side ids; the server's `get_logs` fallback asks
+for the whole buffer and applies minimum-severity filtering itself.
+A real `vrc.upload` re-checks the human arm file when the job starts
+(2.6.7+), so the server keeps that file in place until the attempt ends.
 
 ## Domain reload ritual (plugin)
 

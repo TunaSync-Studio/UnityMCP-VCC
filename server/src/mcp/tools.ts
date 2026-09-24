@@ -13,9 +13,10 @@ import type { ErrorObj } from "../protocol.js";
 import type { RecipeLibrary } from "../recipes.js";
 import type { UnityClient } from "../unity/client.js";
 import type { ProjectPool } from "../unity/pool.js";
+import { LOG_RING_CAPACITY, queryPluginEntries } from "../unity/logs.js";
 import { makeProgressBridge, type ProgressBridge, type ToolExtra } from "./progress.js";
 import { enrichBusyModal, probeBlockedEditor } from "../unity/blockedProbe.js";
-import { armRequiredResult, checkArm, consumeArm } from "../armGate.js";
+import { armRequiredResult, checkArm, claimArm, type ArmClaim } from "../armGate.js";
 import { serverIdentity } from "../version.js";
 import {
   VRC_GET_INSTALL_HINT,
@@ -36,6 +37,7 @@ import {
   projectInfo,
   readEditorRegistry,
   registerInVcc,
+  rejectFlagLike,
   resolveUnityExe,
   vpmActionSpec,
   type VrcGetRunner,
@@ -143,6 +145,19 @@ async function vpmCreate(args: {
       new UnityMcpError({
         code: "INVALID_PARAMS",
         message: "vpm_manage create: 'project' (the NEW directory to make) is required",
+        retryable: false,
+      }),
+    );
+  }
+  try {
+    // L-2: every value below reaches a vrc-get argv.
+    rejectFlagLike("create", "project", args.project);
+    for (const pkg of args.packages ?? []) rejectFlagLike("create", "packages[]", pkg);
+  } catch (err) {
+    return fail(
+      new UnityMcpError({
+        code: "INVALID_PARAMS",
+        message: (err as Error).message,
         retryable: false,
       }),
     );
@@ -310,9 +325,40 @@ async function waitForJob(
           "It was NOT cancelled implicitly.",
       });
     }
-    throw err;
+    const e = toUnityMcpError(err);
+    if (e.code === "JOB_NOT_FOUND") throw e;
+    // Any other failure (DOMAIN_RELOAD, UNITY_UNREACHABLE, a cancelled
+    // wait...) ends the WAIT, not necessarily the job: it was accepted
+    // plugin-side and can still be running. Keep the jobId so the caller
+    // polls it instead of submitting the same job (upload, bake) again.
+    const detail =
+      typeof e.obj.detail === "object" && e.obj.detail !== null && !Array.isArray(e.obj.detail)
+        ? (e.obj.detail as Record<string, unknown>)
+        : e.obj.detail !== undefined
+          ? { cause: e.obj.detail }
+          : {};
+    throw new UnityMcpError({
+      ...e.obj,
+      message:
+        `${e.obj.message} (job ${jobId} was already submitted and may still be running: ` +
+        `poll job_status {"job_id":"${jobId}"} before submitting it again)`,
+      detail: { ...detail, jobId },
+    });
   }
 }
+
+/**
+ * Plugin answers proving job.submit queued nothing (refused before admission:
+ * Dispatcher gates or JobManager.Submit validation). A timeout, a dropped
+ * connection or a reload may have landed, so those count as submitted.
+ */
+const SUBMIT_REFUSED_CODES: ReadonlySet<string> = new Set([
+  "BUSY_MODAL",
+  "LEASE_HELD",
+  "INVALID_PARAMS",
+  "METHOD_NOT_FOUND",
+  "PROTOCOL_ERROR",
+]);
 
 async function runJob(
   client: UnityClient,
@@ -321,12 +367,21 @@ async function runJob(
   timeoutMs: number,
   bridge: ProgressBridge,
   signal: AbortSignal,
+  /** Called once the job may exist plugin-side. */
+  onSubmitted?: () => void,
 ): Promise<CallToolResult> {
-  const submitted = await client.call(
-    "job.submit",
-    { method, params },
-    { timeoutMs: JOB_SUBMIT_TIMEOUT_MS, signal },
-  );
+  let submitted: unknown;
+  try {
+    submitted = await client.call(
+      "job.submit",
+      { method, params },
+      { timeoutMs: JOB_SUBMIT_TIMEOUT_MS, signal },
+    );
+  } catch (err) {
+    if (!(err instanceof UnityMcpError && SUBMIT_REFUSED_CODES.has(err.code))) onSubmitted?.();
+    throw err;
+  }
+  onSubmitted?.();
   const jobId = extractJobId(submitted);
   if (jobId === null) {
     return fail(
@@ -859,7 +914,13 @@ const toolTable: readonly ToolRegistrar[] = [
       "job keeps running and the jobId is reported for job_status.",
     {
       avatar: z.string().describe("Avatar object path or asset path to bake"),
-      output_dir: z.string().optional().describe("Directory for baked output"),
+      output_dir: z
+        .string()
+        .optional()
+        .describe(
+          "Directory for baked output; must be a project path under Assets/ (no '..'). " +
+            "NDMF's generated meshes/materials go to <output_dir>/Generated",
+        ),
       timeout_ms: z.number().int().positive().default(600_000),
       project: projectArg,
     },
@@ -941,22 +1002,29 @@ const toolTable: readonly ToolRegistrar[] = [
       }
       // Second, independent gate: confirm proves caller intent, the arm file
       // proves *operator* intent (one-shot, human-created, TTL-bound).
+      let claim: ArmClaim | null = null;
       if (!args.dry_run) {
         const arm = checkArm(ctx.cfg);
         if (!arm.armed) return armRequiredResult(arm);
-        // L-3: consume is an atomic claim now - if a concurrent call won the
-        // race between our check and here, this attempt is NOT armed.
-        if (!consumeArm(arm.file)) {
+        // L-3: an exclusive claim - if a concurrent call holds this arm, this
+        // attempt is NOT armed. The arm file itself stays in place: the
+        // plugin re-checks it when the job starts (M-1).
+        claim = claimArm(arm.file, ctx.cfg);
+        if (claim === null) {
           return armRequiredResult({
             armed: false,
             file: arm.file,
-            detail: "arm was consumed by a concurrent attempt",
+            detail: "arm is held by a concurrent upload attempt",
           });
         }
       }
-      const { client } = ctx.pool.resolve(args.project);
+      let submitted = false;
       const bridge = makeProgressBridge(extra);
       try {
+        // The arm is spent only once the job may exist plugin-side: a failed
+        // project resolution (PROJECT_AMBIGUOUS / NOT_FOUND / BUSY_MODAL) or
+        // an explicit submit refusal (BUSY_MODAL, LEASE_HELD...) keeps it.
+        const { client } = ctx.pool.resolve(args.project);
         return await runJob(
           client,
           "vrc.upload",
@@ -971,9 +1039,18 @@ const toolTable: readonly ToolRegistrar[] = [
           args.timeout_ms,
           bridge,
           extra.signal,
+          () => {
+            submitted = true;
+          },
         );
       } finally {
         bridge.done();
+        // One arm = one attempt: spent once the job was handed to the plugin
+        // (whatever the outcome), kept when nothing was queued.
+        if (claim !== null) {
+          if (submitted) claim.consume();
+          else claim.release();
+        }
       }
     },
   ),
@@ -983,7 +1060,13 @@ const toolTable: readonly ToolRegistrar[] = [
     "Audit a VRChat avatar (vrc.avatarAudit): performance rank, missing " +
       "components, common upload blockers. checks narrows the audit set.",
     {
-      avatar: z.string().optional().describe("Avatar object path; omit for the scene default"),
+      avatar: z
+        .string()
+        .optional()
+        .describe(
+          "Avatar object path or prefab asset path (e.g. ndmf_bake_run's outputPrefabPath); " +
+            "omit for the scene default",
+        ),
       checks: z.array(z.string()).optional().describe("Subset of audit check names"),
       project: projectArg,
     },
@@ -1004,8 +1087,9 @@ const toolTable: readonly ToolRegistrar[] = [
   tool(
     "find_recipe",
     "Search the server-local Unity recipe library (no Unity call). Exact name " +
-      "match returns that recipe's full markdown; otherwise ranked keyword " +
-      "matches. Recipes are also exposed as recipe://<category>/<name> resources.",
+      "match returns that recipe's full markdown (unless names_only); otherwise " +
+      "ranked keyword matches. Recipes are also exposed as " +
+      "recipe://<category>/<name> resources.",
     {
       query: z.string().describe("Recipe name or keywords"),
       tags: z.array(z.string()).optional().describe("Require all of these tags"),
@@ -1021,7 +1105,7 @@ const toolTable: readonly ToolRegistrar[] = [
         ...(args.tags !== undefined ? { tags: args.tags } : {}),
         topN: args.top_n,
       });
-      if (res.exact) {
+      if (res.exact && !args.names_only) {
         const hit = res.hits[0];
         if (hit) return okText(lib.readBody(hit.entry));
       }
@@ -1057,13 +1141,17 @@ const toolTable: readonly ToolRegistrar[] = [
       "events; falls back to the plugin logs.get when the buffer is empty. " +
       "clear=true clears both sides. Ring entries have two id spaces: 'id' is " +
       "the server-ring id (use for since_id), 'pluginId' matches the ids in " +
-      "eval-response logs[] (plugin ids reset on domain reload).",
+      "eval-response logs[] (plugin ids reset on domain reload). Plugin-fallback " +
+      "entries (source:'plugin') carry only pluginId.",
     {
       level: z
         .enum(["debug", "info", "warning", "error"])
         .optional()
         .describe("Minimum severity"),
-      regex: z.string().optional().describe("Case-insensitive regex over message/stack"),
+      regex: z
+        .string()
+        .optional()
+        .describe("Case-insensitive regex over message/stack (max 200 chars)"),
       count: z.number().int().positive().max(2000).optional().describe("Max entries (default 100)"),
       since_id: z.number().int().nonnegative().optional().describe("Only entries newer than this id"),
       clear: z.boolean().optional().describe("Clear logs instead of querying"),
@@ -1100,16 +1188,21 @@ const toolTable: readonly ToolRegistrar[] = [
         ...(args.count !== undefined ? { count: args.count } : {}),
         ...(args.since_id !== undefined ? { sinceId: args.since_id } : {}),
       };
-      if (logs.totalPushed > 0) {
+      if (logs.size > 0) {
         return ok({ source: "ring", lastId: logs.lastId, entries: logs.query(query) });
       }
-      // Ring is empty (e.g. just connected): ask the plugin, tolerate absence.
+      // Ring is empty (just connected, or dropped on an editor session
+      // change): ask the plugin for its capture buffer, tolerate absence.
+      // Filtering happens here - the plugin's level match is exact and its
+      // ids are another id space - and lastId stays in the ring id space so
+      // a follow-up since_id keeps working once the ring fills.
       try {
-        const remote = await client.call("logs.get", query, {
-          timeoutMs: LIGHT_CALL_TIMEOUT_MS,
-          signal: extra.signal,
-        });
-        return ok({ source: "plugin", result: remote });
+        const remote = await client.call(
+          "logs.get",
+          { count: LOG_RING_CAPACITY },
+          { timeoutMs: LIGHT_CALL_TIMEOUT_MS, signal: extra.signal },
+        );
+        return ok({ source: "plugin", lastId: logs.lastId, entries: queryPluginEntries(remote, query) });
       } catch (err) {
         if (isCode(err, "METHOD_NOT_FOUND")) {
           return ok({ source: "ring", lastId: logs.lastId, entries: [] });
@@ -1729,7 +1822,10 @@ const toolTable: readonly ToolRegistrar[] = [
       avatar: z
         .string()
         .optional()
-        .describe("Avatar object name/path; default = first VRCAvatarDescriptor in loaded scenes"),
+        .describe(
+          "Avatar object name/path or baked prefab asset path; default = first " +
+            "VRCAvatarDescriptor in loaded scenes",
+        ),
       timeout_ms: z.number().int().positive().optional().describe("Per-call timeout in ms"),
       project: projectArg,
     },

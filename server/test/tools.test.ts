@@ -14,7 +14,7 @@ import type { Config } from "../src/config.js";
 import { createMcpServer } from "../src/mcp/server.js";
 import { RecipeLibrary } from "../src/recipes.js";
 import { ProjectPool } from "../src/unity/pool.js";
-import { MockPlugin, type MockPluginOptions } from "./mock-plugin.js";
+import { MockPlugin, MockPluginError, type MockPluginOptions } from "./mock-plugin.js";
 
 function textOf(res: CallToolResult, i = 0): string {
   const c = res.content[i];
@@ -180,6 +180,25 @@ describe("tools over MCP", () => {
     expect(h.mock.received.reqs.some((r) => r.method === "job.cancel")).toBe(false);
   });
 
+  it("a job.wait that fails for another reason still hands back the jobId", async () => {
+    // The WAIT died (reload / dropped connection), not necessarily the job:
+    // without the id the caller's only option was to submit it again.
+    h = await setup({
+      handlers: {
+        "job.wait": () => {
+          throw new MockPluginError("DOMAIN_RELOAD", "domain reload", true);
+        },
+      },
+    });
+    const res = await h.callTool("vrc_upload", { target: "avatar", dry_run: true, timeout_ms: 2_000 });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("[DOMAIN_RELOAD]");
+    expect(textOf(res)).toContain('job_status {"job_id":"job-1"}');
+    const body = jsonOf(res, 1) as { error: { detail: { jobId: string }; retryable: boolean } };
+    expect(body.error.detail.jobId).toBe("job-1");
+    expect(body.error.retryable).toBe(true);
+  });
+
   it("execute_editor_command run_as_job submits then waits for the eval job", async () => {
     h = await setup();
     const res = await h.callTool("execute_editor_command", {
@@ -279,6 +298,14 @@ describe("tools over MCP", () => {
 
       const ranked = jsonOf(await h.callTool("find_recipe", { query: "cube", names_only: true }));
       expect(ranked.totalMatches).toBe(1);
+
+      // names_only wins over the exact-name body (was: full markdown anyway).
+      const exactNames = jsonOf(
+        await h.callTool("find_recipe", { query: "spin_cube", names_only: true }),
+      );
+      const results = exactNames.results as Array<Record<string, unknown>>;
+      expect(results.map((r) => r.name)).toEqual(["spin_cube"]);
+      expect(results[0]?.body).toBeUndefined();
       await h.cleanup();
       h = null;
 

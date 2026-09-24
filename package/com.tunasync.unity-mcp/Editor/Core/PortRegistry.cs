@@ -170,6 +170,7 @@ namespace TunaSync.UnityMCP.Editor
                 {
                     if (string.Equals(Path.GetFileName(file), own, StringComparison.OrdinalIgnoreCase)) continue;
                     int pid = ReadPid(file);
+                    if (pid == PidUnreadable) continue; // locked right now: no evidence of death
                     if (pid <= 0 || !IsProcessAlive(pid))
                     {
                         File.Delete(file);
@@ -182,11 +183,30 @@ namespace TunaSync.UnityMCP.Editor
             }
         }
 
+        // A sibling editor touching (SetLastWriteTimeUtc) or copy-writing its
+        // entry holds the file open: reading it then fails with a sharing
+        // violation. That used to map to -1 and delete a LIVE editor's entry
+        // (undiscoverable until its next 60 s touch).
+        private const int PidUnreadable = int.MinValue;
+
         private static int ReadPid(string file)
         {
+            string json;
             try
             {
-                JObject jo = JObject.Parse(File.ReadAllText(file));
+                json = File.ReadAllText(file);
+            }
+            catch (IOException)
+            {
+                return PidUnreadable;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return PidUnreadable;
+            }
+            try
+            {
+                JObject jo = JObject.Parse(json);
                 JToken pid = jo["pid"];
                 return pid != null ? pid.Value<int>() : -1;
             }

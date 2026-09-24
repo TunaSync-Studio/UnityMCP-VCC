@@ -123,8 +123,8 @@ namespace TunaSync.UnityMCP.Editor
             },
             ["dialog.armUpload"] = new[]
             {
-                "HUMAN OPERATOR ACTION ONLY. Arm exactly one VRChat upload for up to 30 minutes? The server consumes the arm file when an upload begins. Review the active avatar/world and SDK state first.",
-                "人間オペレーター専用操作です。VRChatアップロード1回を最長30分だけ許可しますか？upload開始時にserverが許可ファイルを消費します。対象avatar/worldとSDK状態を先に確認してください。",
+                "HUMAN OPERATOR ACTION ONLY. Arm exactly one VRChat upload for up to 30 minutes? The arm file is consumed when that upload attempt ends. Review the active avatar/world and SDK state first.",
+                "人間オペレーター専用操作です。VRChatアップロード1回を最長30分だけ許可しますか？許可ファイルはそのupload試行の終了時に消費されます。対象avatar/worldとSDK状態を先に確認してください。",
             },
             ["upload.disarmed"] = new[] { "DISARMED", "未許可" },
             ["upload.expired"] = new[] { "EXPIRED (not usable)", "期限切れ (使用不可)" },
