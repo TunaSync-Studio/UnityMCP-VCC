@@ -1,7 +1,9 @@
 // Build script:
 // 1. bundles src/index.ts into a single self-contained build/index.js with a
 //    shebang (the package bin entry),
-// 2. copies <repo>/recipes -> server/recipes for npm packaging, excluding
+// 2. writes build/THIRD_PARTY_LICENSES.txt for every npm package the bundle
+//    actually contains (the bundle keeps no license comments of its own),
+// 3. copies <repo>/recipes -> server/recipes for npm packaging, excluding
 //    field/, _quarantine/ and _report.md, and regenerates a filtered
 //    _index.json for the copied set.
 // Kept as a config file (not an inline npm script) because the banner does
@@ -13,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 
-await build({
+const result = await build({
   entryPoints: ["src/index.ts"],
   bundle: true,
   platform: "node",
@@ -33,9 +35,48 @@ await build({
     js: "#!/usr/bin/env node\nimport { createRequire as __unityMcpCreateRequire } from 'node:module'; const require = __unityMcpCreateRequire(import.meta.url);",
   },
   logLevel: "info",
+  metafile: true,
 });
 
+writeThirdPartyLicenses(result.metafile);
 copyRecipes();
+
+// MIT/ISC/BSD all require their notices to travel with redistributed copies;
+// derive the list from the bundle's real inputs so it cannot drift.
+function writeThirdPartyLicenses(metafile) {
+  const pkgDirs = new Set();
+  for (const input of Object.keys(metafile.inputs)) {
+    const norm = input.split(path.sep).join("/");
+    const at = norm.lastIndexOf("node_modules/");
+    if (at < 0) continue;
+    const parts = norm.slice(at + "node_modules/".length).split("/");
+    const name = parts[0]?.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+    if (name) pkgDirs.add(path.resolve(serverDir, norm.slice(0, at), "node_modules", name));
+  }
+  const sections = [...pkgDirs]
+    .map((dir) => {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+      const licenseFile = fs
+        .readdirSync(dir)
+        .find((f) => /^(licen[sc]e|copying)(\.(md|txt))?$/i.test(f));
+      if (licenseFile === undefined) {
+        throw new Error(`[build] ${pkg.name} is bundled but ships no LICENSE file`);
+      }
+      const text = fs.readFileSync(path.join(dir, licenseFile), "utf8").trim();
+      return { id: `${pkg.name}@${pkg.version}`, license: String(pkg.license ?? "UNKNOWN"), text };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const out = [
+    "Third-party software bundled into build/index.js (generated at build time",
+    "from the bundle's inputs; see NOTICE.md).",
+    "",
+    ...sections.map((s) => `- ${s.id} (${s.license})`),
+    "",
+    ...sections.flatMap((s) => ["=".repeat(72), `${s.id} - ${s.license}`, "=".repeat(72), "", s.text, ""]),
+  ].join("\n");
+  fs.writeFileSync(path.join(serverDir, "build", "THIRD_PARTY_LICENSES.txt"), out, "utf8");
+  console.error(`[build] third-party notices: ${sections.map((s) => s.id).join(", ")}`);
+}
 
 function copyRecipes() {
   const srcRecipes = path.resolve(serverDir, "..", "recipes");
