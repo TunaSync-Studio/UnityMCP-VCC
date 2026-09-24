@@ -29,7 +29,7 @@ It survives domain reloads and editor restarts transparently.
   the Creator Console, or see `tools/arm-vrc-upload.bat` in the repo). Both
   `dry_run` and the real publish path were live-verified on 2026-08-06; the
   2.6.7/2.6.8 servers deleted the arm file before the plugin's own re-check
-  (added in 2.6.7) and so refused every real upload - fixed after 2.6.8 (the
+  (added in 2.6.7) and so refused every real upload - fixed in 2.6.9 (the
   arm now stays in place until the attempt ends).
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks
   `execute_editor_command` / `ndmf_bake_run` / `vrc_upload` / `vpm_manage` /

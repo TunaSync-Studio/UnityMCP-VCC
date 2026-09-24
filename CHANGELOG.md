@@ -6,8 +6,11 @@ package version.
 
 ## [Unreleased]
 
-Fixes from a full review of the 2.6.8 tree. The server fixes ship through
-npm alone; the plugin fixes need a new Unity package release.
+## [2.6.9] - 2026-09-24
+
+Unity plugin + npm server release: fixes from a full review of the 2.6.8
+tree. The server fixes (including the real-upload fix) work with the
+2.6.7/2.6.8 plugins too; the plugin fixes need the 2.6.9 package.
 
 ### Fixed
 - **Real `vrc_upload` works again.** The 2.6.7/2.6.8 server claimed and

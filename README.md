@@ -158,7 +158,7 @@ rest; recipes are also exposed as MCP resources
   Arming without a repo checkout: see `docs/INSTALL.md` § "Arming a real
   VRChat upload". Note: the 2.6.7/2.6.8 npm servers consumed the arm file
   before that plugin-side check ran, so every real upload was refused
-  ("arm file not found"); fixed after 2.6.8 — the arm now stays in place
+  ("arm file not found"); fixed in 2.6.9 — the arm now stays in place
   until the attempt ends. The real publish path has not been re-fired live
   since the fix.
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks the project-writing /
