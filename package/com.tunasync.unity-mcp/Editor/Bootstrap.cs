@@ -289,7 +289,7 @@ namespace TunaSync.UnityMCP.Editor
             if (!string.IsNullOrEmpty(holder)) LeaseManager.Release(holder);
 
             TcpHost host = TcpHost.Current;
-            if (host != null) host.StopWithBye(reason ?? "disabled", null, 250);
+            if (host != null) host.StopWithBye(reason ?? "shutdown", null, 250);
             PortRegistry.DeleteNow();
             _started = false;
             return cancelled;
