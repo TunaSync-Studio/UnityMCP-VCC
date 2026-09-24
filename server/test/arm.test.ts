@@ -11,9 +11,9 @@ import type { Config } from "../src/config.js";
 import { createMcpServer } from "../src/mcp/server.js";
 import { RecipeLibrary } from "../src/recipes.js";
 import { ProjectPool } from "../src/unity/pool.js";
-import { checkArm, DEFAULT_ARM_TTL_MS } from "../src/armGate.js";
+import { armLockPath, checkArm, claimArm, DEFAULT_ARM_TTL_MS } from "../src/armGate.js";
 import { SERVER_VERSION } from "../src/version.js";
-import { MockPlugin } from "./mock-plugin.js";
+import { MockPlugin, MockPluginError } from "./mock-plugin.js";
 
 interface Harness {
   mock: MockPlugin;
@@ -22,11 +22,13 @@ interface Harness {
   cleanup: () => Promise<void>;
 }
 
-async function setup(): Promise<Harness> {
+async function setup(mockOpts: ConstructorParameters<typeof MockPlugin>[0] = {}): Promise<Harness> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-arm-"));
-  const mock = new MockPlugin({ registryDir: tmp });
-  await mock.start();
   const armFile = path.join(tmp, "vrc-upload.arm");
+  // armFile: the mock re-checks the arm when the upload job starts, exactly
+  // like the real plugin (2.6.7+ M-1) - the check CI used to miss.
+  const mock = new MockPlugin({ registryDir: tmp, armFile, ...mockOpts });
+  await mock.start();
   const cfg: Config = {
     projectSelector: undefined,
     registryDir: tmp,
@@ -93,7 +95,7 @@ describe("vrc_upload human arm gate", () => {
   it("armed + confirmed real upload submits and consumes the arm file (one-shot)", async () => {
     h = await setup();
     fs.writeFileSync(h.armFile, "armed by test");
-    await h.callTool("vrc_upload", {
+    const res = await h.callTool("vrc_upload", {
       target: "avatar",
       dry_run: false,
       confirm: true,
@@ -104,7 +106,12 @@ describe("vrc_upload human arm gate", () => {
     const params = (submit?.params as { params: Record<string, unknown> }).params;
     expect(params.confirm).toBe(true);
     expect(params.dryRun).toBe(false);
+    // The plugin's own arm re-check at job start must see the file: 2.6.7/2.6.8
+    // deleted it before job.submit and every real upload failed right here.
+    expect(h.mock.received.armChecks).toEqual([true]);
+    expect(res.isError).not.toBe(true);
     expect(fs.existsSync(h.armFile)).toBe(false);
+    expect(fs.existsSync(armLockPath(h.armFile))).toBe(false);
 
     // Second attempt without re-arming must be refused again.
     const again = await h.callTool("vrc_upload", {
@@ -114,6 +121,65 @@ describe("vrc_upload human arm gate", () => {
     });
     expect(again.isError).toBe(true);
     expect(textOf(again)).toContain("ARM_REQUIRED");
+  });
+
+  it("a failed project resolution does not burn the arm", async () => {
+    h = await setup();
+    fs.writeFileSync(h.armFile, "armed by test");
+    const res = await h.callTool("vrc_upload", {
+      target: "avatar",
+      dry_run: false,
+      confirm: true,
+      project: "no-such-project-anywhere",
+    });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("PROJECT_NOT_FOUND");
+    expect(h.mock.received.reqs.some((r) => r.method === "job.submit")).toBe(false);
+    expect(fs.existsSync(h.armFile)).toBe(true);
+    expect(fs.existsSync(armLockPath(h.armFile))).toBe(false);
+  });
+
+  it("a submit the plugin refuses before admission (BUSY_MODAL) keeps the arm", async () => {
+    h = await setup({
+      handlers: {
+        "job.submit": () => {
+          throw new MockPluginError("BUSY_MODAL", "editor main thread unresponsive", true);
+        },
+      },
+    });
+    fs.writeFileSync(h.armFile, "armed by test");
+    const res = await h.callTool("vrc_upload", { target: "avatar", dry_run: false, confirm: true });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("BUSY_MODAL");
+    expect(fs.existsSync(h.armFile)).toBe(true); // retry after the dialog without re-arming
+    expect(fs.existsSync(armLockPath(h.armFile))).toBe(false);
+  });
+
+  it("a concurrent second attempt cannot ride the same arm", async () => {
+    h = await setup({ jobBehaviors: { "vrc.upload": { progressSteps: 4, stepDelayMs: 100 } } });
+    fs.writeFileSync(h.armFile, "armed by test");
+    const first = h.callTool("vrc_upload", {
+      target: "avatar",
+      dry_run: false,
+      confirm: true,
+      timeout_ms: 5_000,
+    });
+    // Wait until the first attempt's job is running plugin-side.
+    for (let i = 0; i < 100 && h.mock.received.armChecks.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const second = await h.callTool("vrc_upload", {
+      target: "avatar",
+      dry_run: false,
+      confirm: true,
+    });
+    expect(second.isError).toBe(true);
+    expect(textOf(second)).toContain("ARM_REQUIRED");
+    expect(textOf(second)).toContain("concurrent");
+    const firstRes = await first;
+    expect(firstRes.isError).not.toBe(true);
+    expect(h.mock.received.reqs.filter((r) => r.method === "job.submit")).toHaveLength(1);
+    expect(fs.existsSync(h.armFile)).toBe(false);
   });
 
   it("an expired arm file does not arm", async () => {
@@ -167,6 +233,62 @@ describe("vrc_upload human arm gate", () => {
     };
     expect(confirmJson.error.code).toBe("CONFIRM_REQUIRED");
     expect(confirmJson.server.version).toBe(SERVER_VERSION);
+  });
+});
+
+describe("claimArm unit behavior", () => {
+  function withArm(fn: (file: string) => void): void {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-armclaim-"));
+    try {
+      const file = path.join(tmp, "a.arm");
+      fs.writeFileSync(file, "x");
+      fn(file);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  it("is exclusive, keeps the arm until consume, and release keeps it", () => {
+    withArm((file) => {
+      const a = claimArm(file);
+      expect(a).not.toBeNull();
+      expect(claimArm(file)).toBeNull(); // held by a live process (us)
+      expect(fs.existsSync(file)).toBe(true);
+      a?.release();
+      expect(fs.existsSync(file)).toBe(true);
+      const b = claimArm(file);
+      expect(b).not.toBeNull();
+      b?.consume();
+      expect(fs.existsSync(file)).toBe(false);
+      expect(fs.existsSync(armLockPath(file))).toBe(false);
+      expect(claimArm(file)).toBeNull(); // nothing left to claim
+    });
+  });
+
+  it("takes over a lock left by a dead process or older than the TTL", () => {
+    withArm((file) => {
+      // pid 0x7fffffff: never a live process
+      fs.writeFileSync(armLockPath(file), JSON.stringify({ pid: 2147483647, at: "x" }));
+      const a = claimArm(file);
+      expect(a).not.toBeNull();
+      a?.release();
+
+      fs.writeFileSync(armLockPath(file), JSON.stringify({ pid: process.pid, at: "x" }));
+      const old = new Date(Date.now() - DEFAULT_ARM_TTL_MS - 60_000);
+      fs.utimesSync(armLockPath(file), old, old);
+      expect(claimArm(file)).not.toBeNull();
+    });
+  });
+
+  it("does not delete an arm that was re-armed while the attempt ran", () => {
+    withArm((file) => {
+      const a = claimArm(file);
+      expect(a).not.toBeNull();
+      const later = new Date(Date.now() + 5_000);
+      fs.utimesSync(file, later, later); // operator re-armed for the next upload
+      a?.consume();
+      expect(fs.existsSync(file)).toBe(true);
+    });
   });
 });
 

@@ -32,6 +32,14 @@ async function main(): Promise<void> {
     console.error("[unity-mcp] transport closed, shutting down");
     shutdown(0);
   };
+  // MCP stdio shutdown starts with the host closing our stdin. The SDK
+  // transport only listens for data/error, so without this the live Unity
+  // socket kept an orphaned server (and its write lease) alive - and on
+  // Windows there is no SIGTERM to fall back on.
+  process.stdin.once("end", () => {
+    console.error("[unity-mcp] stdin closed, shutting down");
+    shutdown(0);
+  });
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
 

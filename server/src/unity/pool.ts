@@ -44,8 +44,10 @@ export class ProjectPool {
       const client = new UnityClient({
         config: this.cfg,
         // Pin the client to this exact project path; reconnects re-read the
-        // registry through this selector so port changes are picked up.
+        // registry through this selector so port changes are picked up, and
+        // match it exactly (a prefix-sibling project must never be adopted).
         selector: entry.projectPath,
+        exactSelector: true,
         ...this.clientOverrides,
         hooks: {
           onEvent: (ev) => {

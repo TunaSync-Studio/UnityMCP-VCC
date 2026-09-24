@@ -142,12 +142,27 @@ function throwUnresponsive(hits: DiscoveredProject[], now: number): never {
   );
 }
 
+export interface ResolveOptions {
+  /**
+   * Match the selector as a full project path only - no substring fallback.
+   * Pooled clients are pinned to one project path; letting their reconnects
+   * fall back to substring matching moved a client for `.../milfy_neo01` onto
+   * `.../milfy_neo01_jacket` when the first editor closed, and later calls for
+   * the first project ran in the second one.
+   */
+  exact?: boolean;
+}
+
 /**
  * Resolve a selector to exactly one live registry entry.
  * Order: exact normalized path match -> substring match (path or name) ->
  * single-alive default. Throws PROJECT_AMBIGUOUS / PROJECT_NOT_FOUND.
  */
-export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
+export function resolveProject(
+  cfg: Config,
+  selector?: string,
+  opts: ResolveOptions = {},
+): RegistryEntry {
   const sel = selector ?? cfg.projectSelector;
   const now = Date.now();
   const scanned = scanRegistry(cfg, now);
@@ -158,6 +173,17 @@ export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
     const normSel = normalizeProjectPath(sel);
     const exact = alive.find((e) => normalizeProjectPath(e.projectPath) === normSel);
     if (exact) return exact;
+
+    if (opts.exact === true) {
+      const blocked = unresponsive.filter((d) => normalizeProjectPath(d.entry.projectPath) === normSel);
+      if (blocked.length > 0) throwUnresponsive(blocked, now);
+      throw makeError("PROJECT_NOT_FOUND", `project "${sel}" is not running`, {
+        detail: {
+          candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),
+          registryDir: cfg.registryDir,
+        },
+      });
+    }
 
     const needle = sel.toLowerCase();
     const sub = alive.filter(

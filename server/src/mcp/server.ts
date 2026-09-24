@@ -31,7 +31,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     { instructions: SERVER_INSTRUCTIONS },
   );
   registerTools(server, ctx);
-  registerRecipeResources(server, ctx.recipes);
+  registerRecipeResources(server, ctx.recipes, ctx.cfg.stream);
   return server;
 }
 

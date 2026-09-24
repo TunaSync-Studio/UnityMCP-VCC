@@ -56,6 +56,12 @@ export interface UnityClientOptions {
   config: Config;
   /** Project selector; falls back to config.projectSelector. */
   selector?: string;
+  /**
+   * The selector is a full project path this client is pinned to: every
+   * (re)discovery matches it exactly and never falls back to substring
+   * matching, which could hand the client a different project.
+   */
+  exactSelector?: boolean;
   hooks?: UnityClientHooks;
   // Test knobs - production uses the protocol defaults.
   heartbeatMs?: number;
@@ -107,6 +113,7 @@ export class UnityClient {
   readonly sessionId: string = randomUUID();
   private readonly cfg: Config;
   private readonly selector: string | undefined;
+  private readonly exactSelector: boolean;
   private readonly hooks: UnityClientHooks;
   private readonly pending: PendingMap;
   private conn: Connection | null = null;
@@ -132,6 +139,7 @@ export class UnityClient {
   constructor(opts: UnityClientOptions) {
     this.cfg = opts.config;
     this.selector = opts.selector ?? opts.config.projectSelector;
+    this.exactSelector = opts.exactSelector === true && opts.selector !== undefined;
     this.hooks = opts.hooks ?? {};
     this.graceReloadMs = opts.graceReloadMs ?? GRACE_RELOAD_MS;
     this.graceCloseMs = opts.graceCloseMs ?? GRACE_CLOSE_MS;
@@ -403,7 +411,7 @@ export class UnityClient {
 
         let entry: RegistryEntry;
         try {
-          entry = resolveProject(this.cfg, this.selector);
+          entry = this.resolveEntry();
         } catch (err) {
           if (!inGrace) {
             this.enterFailed(
@@ -501,6 +509,10 @@ export class UnityClient {
     }
   }
 
+  private resolveEntry(): RegistryEntry {
+    return resolveProject(this.cfg, this.selector, { exact: this.exactSelector });
+  }
+
   private backoffDelay(attempt: number): number {
     const idx = Math.min(attempt - 1, this.backoffMs.length - 1);
     return jitter(this.backoffMs[idx] ?? 5000);
@@ -562,8 +574,12 @@ export class UnityClient {
         : { code: "UNITY_UNREACHABLE", message: "connection to Unity closed", retryable: false },
     );
 
-    if (bye && (bye.reason === "quit" || bye.reason === "shutdown")) {
-      this.enterFailed(makeError("UNITY_UNREACHABLE", `Unity said bye (${bye.reason})`));
+    // Only domain_reload promises a comeback. quit/shutdown - and any reason
+    // this server does not know, e.g. the 2.6.x plugin's operator stop
+    // ("disabled_by_operator") - fail fast; the rediscover timer reconnects
+    // once the editor advertises itself again.
+    if (bye && bye.reason !== "domain_reload") {
+      this.enterFailed(makeError("UNITY_UNREACHABLE", `Unity said bye (${String(bye.reason)})`));
       return;
     }
 
@@ -578,7 +594,7 @@ export class UnityClient {
     // pid dead -> fresh discovery (project may have moved ports or gone away).
     let stillRegistered = false;
     try {
-      resolveProject(this.cfg, this.selector);
+      this.resolveEntry();
       stillRegistered = true;
     } catch {
       stillRegistered = false;
@@ -608,7 +624,7 @@ export class UnityClient {
         return;
       }
       try {
-        resolveProject(this.cfg, this.selector);
+        this.resolveEntry();
       } catch {
         return; // still nothing to connect to
       }

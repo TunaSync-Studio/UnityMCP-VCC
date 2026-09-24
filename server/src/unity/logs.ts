@@ -122,3 +122,25 @@ export class LogRing {
     this.entries.length = 0;
   }
 }
+
+/** A plugin-side log entry as get_logs returns it from the logs.get fallback. */
+export type PluginLogEntry = Omit<LogEntry, "id">;
+
+/**
+ * Apply the get_logs query contract to the plugin's logs.get answer. The
+ * plugin matches `level` EXACTLY (so "error" dropped exceptions/asserts and
+ * "debug" matched nothing) and speaks its own id space, so the fallback asks
+ * it for the whole capture buffer and filters here: minimum severity, regex
+ * over message/stack, count. Entries keep the plugin id as pluginId; they get
+ * no server-ring id (sinceId does not apply to them).
+ */
+export function queryPluginEntries(raw: unknown, q: LogQuery): PluginLogEntry[] {
+  const list =
+    typeof raw === "object" && raw !== null && Array.isArray((raw as { entries?: unknown }).entries)
+      ? ((raw as { entries: unknown[] }).entries)
+      : [];
+  const scratch = new LogRing(Math.max(list.length, 1));
+  for (const e of list) scratch.push(e);
+  const { sinceId: _ignored, ...rest } = q;
+  return scratch.query(rest).map(({ id: _ringId, ...entry }) => entry);
+}

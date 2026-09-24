@@ -180,6 +180,24 @@ describe("reconnect", () => {
     expect(client.getState()).toBe("failed");
   });
 
+  it("treats an unknown bye reason (plugin operator stop) as terminal, not a 30 s grace", async () => {
+    mock = new MockPlugin({ registryDir: tmp });
+    await mock.start();
+    client = new UnityClient({ config: cfg, backoffMs: [50], heartbeatMs: 0 });
+    await client.call("sys.echo", { warm: 1 });
+    // 2.6.x plugins send this reason from Tools > Disable; the registry
+    // entry (still pointing at a live pid) is left behind here on purpose.
+    await mock.sayByeAndClose("disabled_by_operator");
+    await waitFor(() => client!.getState() === "failed", 2000);
+    const started = Date.now();
+    const err = await client.call("sys.echo", {}, { timeoutMs: 30_000 }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect((err as UnityMcpError).code).toBe("UNITY_UNREACHABLE");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("fails fast with UNITY_UNREACHABLE while failed, before any grace", async () => {
     mock = new MockPlugin({ registryDir: tmp });
     await mock.start();

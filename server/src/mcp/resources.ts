@@ -4,6 +4,7 @@
 
 import { ResourceTemplate, type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RecipeLibrary } from "../recipes.js";
+import { STREAM_DISABLED, maskText, type StreamModeState } from "../streamMode.js";
 
 function decodeSegment(v: string | string[] | undefined): string {
   const raw = Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
@@ -18,7 +19,14 @@ export function recipeUri(category: string, name: string): string {
   return `recipe://${encodeURIComponent(category)}/${encodeURIComponent(name)}`;
 }
 
-export function registerRecipeResources(server: McpServer, recipes: RecipeLibrary): void {
+export function registerRecipeResources(
+  server: McpServer,
+  recipes: RecipeLibrary,
+  stream: StreamModeState = STREAM_DISABLED,
+): void {
+  // Resources bypass the tool wrapper, so stream-mode masking is applied
+  // here too (unavailable/unreadable messages embed absolute paths).
+  const mask = (text: string): string => maskText(text, stream);
   const template = new ResourceTemplate("recipe://{category}/{name}", {
     list: () => {
       if (!recipes.available) return { resources: [] };
@@ -43,16 +51,16 @@ export function registerRecipeResources(server: McpServer, recipes: RecipeLibrar
     },
     (uri, variables) => {
       if (!recipes.available) {
-        throw new Error(recipes.unavailableMessage());
+        throw new Error(mask(recipes.unavailableMessage()));
       }
       const category = decodeSegment(variables.category);
       const name = decodeSegment(variables.name);
       const entry = recipes.find(category, name);
       if (entry === null) {
-        throw new Error(`unknown recipe: ${category}/${name}`);
+        throw new Error(mask(`unknown recipe: ${category}/${name}`));
       }
       return {
-        contents: [{ uri: uri.href, mimeType: "text/markdown", text: recipes.readBody(entry) }],
+        contents: [{ uri: uri.href, mimeType: "text/markdown", text: mask(recipes.readBody(entry)) }],
       };
     },
   );

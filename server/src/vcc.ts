@@ -13,6 +13,7 @@ import { execFile, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pidAlive } from "./discovery.js";
 
 export interface VccProjectEntry {
   path: string;
@@ -228,9 +229,13 @@ export const VRC_GET_INSTALL_HINT =
   "(or scoop install vrc-get / cargo install vrc-get), then retry. " +
   "Read-only project inspection (vcc_project) works without it.";
 
-let cachedVrcGet: string | null | undefined;
+let cachedVrcGet: string | undefined;
 
-/** Locate vrc-get on PATH (cached per process). */
+/**
+ * Locate vrc-get on PATH. A hit is cached per process; a miss is NOT, so the
+ * install hint's "install it, then retry" works without restarting the MCP
+ * server (the scan is a handful of access() calls).
+ */
 export function findVrcGet(): string | null {
   if (cachedVrcGet !== undefined) return cachedVrcGet;
   // L-1 (audit): .cmd/.bat cannot be started by execFile (no shell) - finding
@@ -250,7 +255,6 @@ export function findVrcGet(): string | null {
       }
     }
   }
-  cachedVrcGet = null;
   return null;
 }
 
@@ -318,6 +322,19 @@ export interface VpmActionSpec {
 }
 
 /**
+ * L-2 (audit): a leading "-" would be parsed by vrc-get as a FLAG, not a
+ * value (argument injection through package/version/project). Reject rather
+ * than insert "--": vrc-get's own flag parsing varies per subcommand. Every
+ * caller-supplied value that reaches a vrc-get argv goes through this.
+ */
+export function rejectFlagLike(action: string, label: string, v: string): string {
+  if (v.startsWith("-")) {
+    throw new Error(`vpm_manage ${action}: '${label}' may not start with '-' (got '${v}')`);
+  }
+  return v;
+}
+
+/**
  * Maps a vpm_manage action to a vrc-get invocation. Throws on unknown
  * actions or missing required params - the tool layer converts that to
  * INVALID_PARAMS.
@@ -326,15 +343,7 @@ export function vpmActionSpec(
   action: string,
   opts: { project?: string; package?: string; version?: string },
 ): VpmActionSpec {
-  // L-2 (audit): a leading "-" would be parsed by vrc-get as a FLAG, not a
-  // value (argument injection through package/version). Reject rather than
-  // insert "--": vrc-get's own flag parsing varies per subcommand.
-  const noFlag = (label: string, v: string): string => {
-    if (v.startsWith("-")) {
-      throw new Error(`vpm_manage ${action}: '${label}' may not start with '-' (got '${v}')`);
-    }
-    return v;
-  };
+  const noFlag = (label: string, v: string): string => rejectFlagLike(action, label, v);
   const project = opts.project;
   const needProject = (): string => {
     if (!project) throw new Error(`vpm_manage ${action}: 'project' is required`);
@@ -378,7 +387,7 @@ export function vpmActionSpec(
       // through silently is exactly the failure mode this note guards.
       const a = ["upgrade", "--project", needProject()];
       if (opts.package) {
-        a.push(opts.package);
+        a.push(noFlag("package", opts.package));
         if (opts.version) a.push(opts.version);
       }
       a.push("-y");
@@ -622,12 +631,9 @@ export function editorOpenOn(projectPath: string): {
       };
       if (!parsed.projectPath || typeof parsed.pid !== "number") continue;
       if (!samePath(parsed.projectPath, projectPath)) continue;
-      try {
-        process.kill(parsed.pid, 0);
-        return { open: true, pid: parsed.pid, source: "registry" };
-      } catch {
-        // dead pid: stale entry, not an open editor
-      }
+      // pidAlive counts EPERM (an elevated / other-user editor) as alive.
+      if (pidAlive(parsed.pid)) return { open: true, pid: parsed.pid, source: "registry" };
+      // dead pid: stale entry, not an open editor
     } catch {
       // unreadable/corrupt entry - resilience over strictness (2.5.0 rule)
     }
@@ -667,13 +673,7 @@ export function readEditorRegistry(): EditorRegistryEntry[] {
         port?: number;
       };
       if (!parsed.projectPath || typeof parsed.pid !== "number") continue;
-      let alive = false;
-      try {
-        process.kill(parsed.pid, 0);
-        alive = true;
-      } catch {
-        alive = false;
-      }
+      const alive = pidAlive(parsed.pid);
       out.push({
         projectPath: parsed.projectPath,
         projectName: parsed.projectName,
@@ -780,22 +780,38 @@ export function launchUnity(projectPath: string, exe: string): { pid: number } {
   return { pid: child.pid };
 }
 
-/** Graceful close first: taskkill without /F posts WM_CLOSE. */
+/**
+ * Graceful close first: taskkill without /F posts WM_CLOSE. Off Windows
+ * (where taskkill does not exist and quit could never succeed) SIGTERM is
+ * the equivalent request.
+ */
 export function closeProcessGracefully(pid: number): { requested: boolean; detail: string } {
+  if (process.platform !== "win32") return signalProcess(pid, "SIGTERM");
   const r = spawnSync("taskkill", ["/PID", String(pid)], { encoding: "utf8" });
   return { requested: r.status === 0, detail: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
 
 /** Forced kill - can corrupt Library; only after a graceful attempt. */
 export function killProcess(pid: number): { requested: boolean; detail: string } {
+  if (process.platform !== "win32") return signalProcess(pid, "SIGKILL");
   const r = spawnSync("taskkill", ["/PID", String(pid), "/F"], { encoding: "utf8" });
   return { requested: r.status === 0, detail: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
 
+function signalProcess(pid: number, signal: NodeJS.Signals): { requested: boolean; detail: string } {
+  try {
+    process.kill(pid, signal);
+    return { requested: true, detail: `${signal} sent to pid ${pid}` };
+  } catch (err) {
+    return { requested: false, detail: `${signal} to pid ${pid} failed: ${(err as Error).message}` };
+  }
+}
+
 // M-5 (kimi audit): this used to be a second implementation that treated
 // EPERM as dead while discovery.ts treats it as alive - quit could misreport
-// its outcome depending on which copy answered. Single source of truth now.
-export { pidAlive } from "./discovery.js";
+// its outcome depending on which copy answered. Single source of truth now
+// (editorOpenOn/readEditorRegistry included).
+export { pidAlive };
 
 /**
  * M-3 (kimi audit): a registry pid is only evidence, not proof - a crashed

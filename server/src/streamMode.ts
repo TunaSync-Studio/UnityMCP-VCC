@@ -89,10 +89,15 @@ export function streamLockedResult(reason: string): CallToolResult {
 
 // ---- path / term masking ----------------------------------------------------
 
-// <drive>:\Users\<name> (any slash direction, tolerates JSON-escaped "\\").
-// Only the user-name path segment is masked; bare words are never touched, so
-// e.g. "TOKEN" can never be mangled by the default rules.
-const USER_DIR_RE = /([A-Za-z]:)([\\/]+Users[\\/]+)[^\\/:*?"<>|\s]+/g;
+// <drive>:\Users\<name> (any slash direction, tolerates JSON-escaped "\\",
+// any letter case). Only the user-name path segment is masked; bare words are
+// never touched, so e.g. "TOKEN" can never be mangled by the default rules.
+// Windows user names may contain spaces (incl. U+3000), so the segment runs
+// to the next character a user name can never contain - stopping at the
+// first space leaked "Smith" of "John Smith" (and "太郎" of "田中　太郎").
+const USER_DIR_RE = /([A-Za-z]:)([\\/]+Users[\\/]+)[^\\/"[\]:;|=,+*?<>\r\n]+/gi;
+// macOS /Users/<name> and Linux /home/<name> (not inside URLs or words).
+const POSIX_HOME_RE = /(?<![\w.~-])(\/(?:Users|home)\/)[^/\s"'<>|:;,=+*?[\]]+/gi;
 
 function jsonEscaped(term: string): string {
   return term.split("\\").join("\\\\");
@@ -100,7 +105,9 @@ function jsonEscaped(term: string): string {
 
 export function maskText(text: string, state: StreamModeState): string {
   if (!state.enabled) return text;
-  let out = text.replace(USER_DIR_RE, (_m, drive: string, mid: string) => `${drive}${mid}****`);
+  let out = text
+    .replace(USER_DIR_RE, (_m, drive: string, mid: string) => `${drive}${mid}****`)
+    .replace(POSIX_HOME_RE, (_m, prefix: string) => `${prefix}****`);
   for (const term of state.masks) {
     if (term.length === 0) continue;
     out = out.split(term).join("****");
