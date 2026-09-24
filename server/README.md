@@ -12,8 +12,10 @@ It survives domain reloads and editor restarts transparently.
 
 ## Status and scope
 
-- **Windows only** today (registry/consent paths and the Roslyn eval engine
-  are Windows-specific). macOS/Linux untested.
+- **Developed and verified on Windows.** The formerly Windows-only spots
+  (eval toolchain probe, `UNITY_MCP_REGISTRY_DIR` on both sides, token-file
+  permissions) are POSIX-aware since 2.6.7, but macOS/Linux are not verified
+  on real hardware yet - best effort.
 - **Unity 2022.3** verified (2022.3.22f1). Other majors unverified; the eval
   engine probes the editor's bundled toolchain and reports
   `EVAL_ENGINE_UNAVAILABLE` instead of guessing.
@@ -23,18 +25,23 @@ It survives domain reloads and editor restarts transparently.
   your OS user. Still: use it on projects under version control.
 - **`vrc_upload` real publishing is double-gated**: it needs `confirm:true`
   **and** a human-created one-shot arm file
-  (`%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm`, TTL 30 min — see
-  `tools/arm-vrc-upload.bat` in the repo). Both `dry_run` and the real
-  publish path are live-verified (2026-08-06).
+  (`%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm`, TTL 30 min — arm it from
+  the Creator Console, or see `tools/arm-vrc-upload.bat` in the repo). Both
+  `dry_run` and the real publish path were live-verified on 2026-08-06; the
+  2.6.7/2.6.8 servers deleted the arm file before the plugin's own re-check
+  (added in 2.6.7) and so refused every real upload - fixed after 2.6.8 (the
+  arm now stays in place until the attempt ends).
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks
   `execute_editor_command` / `ndmf_bake_run` / `vrc_upload` / `vpm_manage` /
   `unity_editor` / `asset_import` / `vcc_project` /
-  `session_lease{takeover}` and masks `X:\Users\<name>` path segments (plus
-  `UNITY_MCP_STREAM_MASK` terms) in all output — for screen-shared sessions.
+  `session_lease{takeover}` and masks the user-name segment of
+  `X:\Users\<name>`, `/Users/<name>` and `/home/<name>` paths (plus
+  `UNITY_MCP_STREAM_MASK` terms) in tool and recipe-resource output — for
+  screen-shared sessions.
 
 ## Setup
 
-Requires Node.js >= 20 and a Unity project with the UnityMCP plugin installed.
+Requires Node.js >= 20.19 and a Unity project with the UnityMCP plugin installed.
 
 ### Claude Code
 
@@ -90,8 +97,10 @@ long NDMF/upload waits, set `tool_timeout_sec = 1300` in the server's
 | `UNITY_MCP_DEFAULT_TIMEOUT_MS` | `60000` | Default per-call timeout |
 | `UNITY_MCP_STREAM_MODE` | off | `1` = streaming mode: lock destructive/publishing tools, mask user paths in output |
 | `UNITY_MCP_STREAM_MASK` | (none) | Extra literal terms to mask, `;`-separated |
-| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` | Human arm file required (with `confirm:true`) for a real `vrc_upload` |
-| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed per attempt) |
+| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` | Human arm file required (with `confirm:true`) for a real `vrc_upload`. The Unity plugin re-checks the same file when the upload job starts and reads this variable from the **editor's** environment, so an override must be set for both processes (on macOS/Linux the two default locations differ - set it explicitly). The Creator Console arm button and `tools/*.bat` always use the default path |
+| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed when the attempt ends). Read by both sides like `UNITY_MCP_ARM_FILE` |
+| `UNITY_MCP_VCC_SETTINGS` | `%LOCALAPPDATA%\VRChatCreatorCompanion\settings.json` | VCC settings file read by `vcc_project` / written by `vpm_manage create` |
+| `UNITY_MCP_VCC_TEMPLATES` | `VRCTemplates` next to the VCC settings | Project templates used by `vpm_manage create` |
 
 ## Tools
 

@@ -1,8 +1,9 @@
 # Streaming mode (配信モード)
 
 One environment variable puts the MCP server into a screen-share-safe state:
-destructive / publishing tools refuse to run, and user-identifying filesystem
-paths are masked in everything the server returns.
+project-writing / publishing tools refuse to run (see the table for exactly
+which), and user-identifying filesystem paths are masked in everything the
+server returns.
 
 ```
 UNITY_MCP_STREAM_MODE=1
@@ -22,7 +23,7 @@ UNITY_MCP_STREAM_MASK=CodenameA;MySecretProject     # optional extra terms
 | `vcc_project` | **Locked** — enumerates every project on the machine (WIP names would leak on stream) |
 | `session_lease {action:"takeover"}` | **Locked** — cannot steal another session's write lease; `acquire/release/status` still work |
 | All other tools (`get_editor_state`, `scene_query`, `camera_capture`, `get_logs`, `find_recipe`, `unity_health_check`, `job_status`, `job_cancel`, `vrc_avatar_audit`, `vrc_menu`) | Available |
-| Tool results, error text, progress messages | `X:\Users\<name>` → `X:\Users\****` (any slash style, JSON-escaped too) + every `UNITY_MCP_STREAM_MASK` term → `****` |
+| Tool results, error text, progress messages, `recipe://` resource reads | The user-name segment of `X:\Users\<name>` (any slash style, any case, JSON-escaped too; names with spaces are masked whole), `/Users/<name>` and `/home/<name>` → `****`, + every `UNITY_MCP_STREAM_MASK` term → `****` |
 
 A locked call is refused **before** anything is sent to the Unity plugin.
 
