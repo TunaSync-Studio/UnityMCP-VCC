@@ -607,13 +607,9 @@ namespace TunaSync.UnityMCP.Editor
         {
             string file = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_FILE");
             if (string.IsNullOrEmpty(file)) file = McpUiModel.UploadArmPath;
-            double ttlMin = McpUiModel.UploadArmTtl.TotalMinutes;
-            string ttlEnv = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_TTL_MIN");
-            if (!string.IsNullOrEmpty(ttlEnv))
-            {
-                double parsed;
-                if (double.TryParse(ttlEnv, out parsed) && parsed > 0) ttlMin = parsed;
-            }
+            double ttlMin = UploadArmClaim.ResolveTtlMinutes(
+                Environment.GetEnvironmentVariable("UNITY_MCP_ARM_TTL_MIN"),
+                McpUiModel.UploadArmTtl.TotalMinutes);
             string state = UploadArmClaim.TryClaim(file, ttlMin);
             if (state == null) return;
             string hint = "";

@@ -274,7 +274,7 @@ describe("vrc_upload human arm gate", () => {
 });
 
 describe("checkArm unit behavior", () => {
-  it("reports missing / fresh / expired correctly", () => {
+  it("reports missing / fresh / expired / future-dated correctly", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "unitymcp-armunit-"));
     const file = path.join(tmp, "a.arm");
     try {
@@ -287,6 +287,16 @@ describe("checkArm unit behavior", () => {
       const stale = checkArm({ armFile: file, armTtlMs: 60_000 });
       expect(stale.armed).toBe(false);
       expect(stale.detail).toContain("expired");
+      // Future-dated (clock set back after arming): refused like the plugin does.
+      const ahead = new Date(Date.now() + 10 * 60_000);
+      fs.utimesSync(file, ahead, ahead);
+      const future = checkArm({ armFile: file });
+      expect(future.armed).toBe(false);
+      expect(future.detail).toContain("in the future");
+      // A few seconds of skew is tolerated.
+      const slightly = new Date(Date.now() + 5_000);
+      fs.utimesSync(file, slightly, slightly);
+      expect(checkArm({ armFile: file }).armed).toBe(true);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

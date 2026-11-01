@@ -30,6 +30,8 @@ import type { Config } from "./config.js";
 import { SERVER_VERSION, serverIdentity } from "./version.js";
 
 export const DEFAULT_ARM_TTL_MS = 30 * 60 * 1000;
+/** An arm stamped further ahead than this is refused (clock moved back). */
+export const ARM_FUTURE_TOLERANCE_MS = 60 * 1000;
 
 export interface ArmCheck {
   armed: boolean;
@@ -59,6 +61,17 @@ export function checkArm(
     return { armed: false, file, detail: "arm file not found" };
   }
   const ageMs = now - st.mtimeMs;
+  // Same rule as the plugin's UploadArmClaim: a future-dated arm (armed, then
+  // the clock was set back) would otherwise outlive its TTL.
+  if (ageMs < -ARM_FUTURE_TOLERANCE_MS) {
+    return {
+      armed: false,
+      file,
+      detail:
+        `arm file timestamp is ${Math.round(-ageMs / 60000)} min in the future ` +
+        "(was the clock changed?)",
+    };
+  }
   if (ageMs > ttlMs) {
     return {
       armed: false,

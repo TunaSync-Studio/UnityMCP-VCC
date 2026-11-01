@@ -17,12 +17,18 @@ package version.
   (`vrc-upload.arm.lock`, created with `FileMode.CreateNew`). One arm
   still buys exactly one attempt, also when attempts race - including
   two editors sharing one arm (L-3) - and a client that bypasses the
-  server still cannot skip it (M-1). The claim deliberately does not
+  server still cannot skip it on `vrc.upload` (M-1). The claim deliberately does not
   rely on `File.Move`: Mono on macOS/Linux implements it as link +
   unlink, so two concurrent moves of one file can both succeed. The
   server only pre-checks the arm (early `ARM_REQUIRED` without
   submitting anything) and never consumes it. The Creator Console arm
   dialog now says the plugin consumes the arm.
+- Arm TTL: the plugin reads `UNITY_MCP_ARM_TTL_MIN` the way the server
+  does (culture-invariant, positive and finite - `1.5` no longer becomes
+  15 minutes in locales with a decimal comma, and `Infinity` is
+  ignored), and an arm stamped more than a minute in the future (the
+  clock was set back after arming) is refused by both the server and the
+  plugin instead of outliving its TTL.
 - Tests: the server arm tests now emulate the plugin-side gate of each
   plugin generation (claim / read-only check / none); the old test only
   asserted that the server deleted the file, which is how the conflict

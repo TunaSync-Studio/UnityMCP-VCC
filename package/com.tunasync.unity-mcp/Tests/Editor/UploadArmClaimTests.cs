@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using NUnit.Framework;
@@ -63,6 +64,48 @@ namespace TunaSync.UnityMCP.Editor.Tests
             StringAssert.Contains("expired", state);
             Assert.IsFalse(File.Exists(arm));
             Assert.AreEqual(0, Directory.GetFiles(dir).Length);
+        }
+
+        [Test]
+        public void FutureDatedArmIsRefusedAndDiscarded()
+        {
+            // e.g. armed, then the clock was set back: the TTL would not bound it.
+            File.WriteAllText(arm, "armed");
+            File.SetLastWriteTimeUtc(arm, DateTime.UtcNow.AddMinutes(10));
+            string state = UploadArmClaim.TryClaim(arm, 30);
+            Assert.IsNotNull(state);
+            StringAssert.Contains("in the future", state);
+            Assert.IsFalse(File.Exists(arm));
+        }
+
+        [Test]
+        public void TtlOverrideIsParsedLikeTheServer()
+        {
+            CultureInfo saved = Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                // "1.5" must not become 15 where ',' is the decimal separator.
+                Thread.CurrentThread.CurrentCulture = new CultureInfo("de-DE");
+                Assert.AreEqual(1.5, UploadArmClaim.ResolveTtlMinutes("1.5", 30));
+                Assert.AreEqual(45d, UploadArmClaim.ResolveTtlMinutes(" 45 ", 30));
+                Assert.AreEqual(30d, UploadArmClaim.ResolveTtlMinutes(null, 30));
+            }
+            finally
+            {
+                Thread.CurrentThread.CurrentCulture = saved;
+            }
+        }
+
+        [TestCase("")]
+        [TestCase("0")]
+        [TestCase("-5")]
+        [TestCase("abc")]
+        [TestCase("Infinity")]
+        [TestCase("NaN")]
+        [TestCase("1,5")]
+        public void InvalidTtlOverrideFallsBackToDefault(string value)
+        {
+            Assert.AreEqual(30d, UploadArmClaim.ResolveTtlMinutes(value, 30));
         }
 
         [Test]
