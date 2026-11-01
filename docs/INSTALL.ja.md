@@ -151,3 +151,7 @@ New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 無い、プラグインが古い) と `dry_run` では消費されません。
 **AI に作らせないでください** — 人間がボタンに触れたこと自体が、このゲートの
 意味です。
+
+アップロードが動いていないのに「arm claim lock is held」で実アップロードが
+拒否される場合 (エディタが異常終了した後など) は、arm ファイルと同じ場所にある
+`vrc-upload.arm.lock` を削除してから arm し直してください。

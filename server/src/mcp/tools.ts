@@ -974,8 +974,8 @@ const toolTable: readonly ToolRegistrar[] = [
       }
       // Second, independent gate: confirm proves caller intent, the arm file
       // proves *operator* intent (one-shot, human-created, TTL-bound). The
-      // server only pre-checks it; the plugin claims (consumes) it atomically
-      // right before the upload starts (L-3/M-1). Consuming it here too made
+      // server only pre-checks it; the plugin claims (consumes) it exactly
+      // once, right before the upload starts (L-3/M-1). Consuming it here too made
       // the 2.6.7+ plugin-side gate refuse every real upload.
       if (!args.dry_run) {
         const arm = checkArm(ctx.cfg);

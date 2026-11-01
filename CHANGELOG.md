@@ -12,17 +12,23 @@ package version.
   the plugin-side arm check added in 2.6.7 (M-1) then found no file, so
   the job always failed with "arm file not found" (fail-safe — nothing
   was published, but the arm was used up). The Unity plugin is now the
-  single consumer: right before the upload starts it claims the arm
-  atomically (rename, then delete) and checks the TTL on the claimed
-  file. One arm still buys exactly one attempt, also under concurrent
-  calls (L-3), and a client that bypasses the server still cannot skip
-  it (M-1). The server only pre-checks the arm (early `ARM_REQUIRED`
-  without submitting anything) and never consumes it. The Creator
-  Console arm dialog now says the plugin consumes the arm.
-- Tests: the arm tests now emulate the plugin-side gate of each plugin
-  generation (claim / read-only check / none). The old test only
+  single consumer: right before the upload starts it checks the TTL and
+  deletes the arm while holding an exclusive claim lock
+  (`vrc-upload.arm.lock`, created with `FileMode.CreateNew`). One arm
+  still buys exactly one attempt, also when attempts race - including
+  two editors sharing one arm (L-3) - and a client that bypasses the
+  server still cannot skip it (M-1). The claim deliberately does not
+  rely on `File.Move`: Mono on macOS/Linux implements it as link +
+  unlink, so two concurrent moves of one file can both succeed. The
+  server only pre-checks the arm (early `ARM_REQUIRED` without
+  submitting anything) and never consumes it. The Creator Console arm
+  dialog now says the plugin consumes the arm.
+- Tests: the server arm tests now emulate the plugin-side gate of each
+  plugin generation (claim / read-only check / none); the old test only
   asserted that the server deleted the file, which is how the conflict
-  with the plugin-side check went unnoticed.
+  with the plugin-side check went unnoticed. New Unity EditMode tests
+  (`UploadArmClaimTests`) cover the claim itself, including racing
+  claimants.
 
 ### Changed
 - **Real uploads need the server and the Unity package from the same

@@ -50,7 +50,7 @@ run and the tests are silently skipped (exit code 0, no results XML).
 ## 4. SDK testbed (defines ON — VRC avatars + NDMF stack)
 
 - Compile: 0 errors with MCP_VRCSDK3_AVATARS / MCP_NDMF active.
-- `welcome.features` includes `ndmf`, `vrcAvatars`.
+- `welcome.features` includes `ndmf`, `vrcAvatars`, `vrcUploadArmClaim`.
 - `vrc_avatar_audit` on a real avatar returns all requested checks.
 - `ndmf_bake_run` on a real avatar: progress stream → output prefab exists;
   prefab still healthy after editor restart.

@@ -6,9 +6,9 @@
 // create (tools\arm-vrc-upload.bat). The file expires after a TTL.
 //
 // Who consumes it: the Unity plugin, and only the plugin. Right before a real
-// upload starts it claims the arm atomically (rename, then delete), so one arm
-// buys exactly one attempt even under concurrent calls (L-3) and a client
-// driving the plugin directly cannot skip it (M-1). The server only
+// upload starts it checks and deletes the arm under an exclusive claim lock
+// (UploadArmClaim.cs), so one arm buys exactly one attempt even when attempts
+// race (L-3) and a client driving the plugin directly cannot skip it (M-1). The server only
 // pre-checks the arm (read-only) to refuse early without submitting a job, and
 // submits real uploads only to plugins that advertise ARM_CLAIM_FEATURE.
 // (Through 2.6.8 the server consumed the arm before submitting the job while

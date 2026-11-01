@@ -97,8 +97,8 @@ export interface MockPluginOptions {
   /**
    * Emulates the plugin-side human arm gate of a real (non-dryRun) vrc.upload
    * job when it runs (job.wait):
-   * - "claim": fixed plugin - atomically claims (rename, then delete) the arm
-   *   file; the job fails when the claim fails.
+   * - "claim": fixed plugin - consumes the arm exactly once (emulated with an
+   *   atomic Node rename, then delete); the job fails when the claim fails.
    * - "check": 2.6.7-2.6.8 plugin - read-only existence check, never consumes.
    */
   armGate?: { file: string; mode: "claim" | "check" };

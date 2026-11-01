@@ -1,6 +1,6 @@
 // Human arm gate: a real vrc_upload needs confirm:true AND a fresh one-shot
 // arm file. The server only pre-checks the arm; the Unity plugin is the single
-// consumer (atomic claim right before the upload). The mock emulates the
+// consumer (exclusive claim right before the upload). The mock emulates the
 // plugin-side gate of each plugin generation. Self-contained harness (same
 // shape as confirm.test.ts).
 import * as fs from "node:fs";
