@@ -615,7 +615,8 @@ namespace TunaSync.UnityMCP.Editor
             string hint = "";
             if (state == UploadArmClaim.NotFound)
             {
-                hint = " If the operator did arm it: an MCP server older than this plugin may " +
+                hint = " If the operator did arm it: another upload attempt may have used it " +
+                    "after the server checked it, an MCP server older than this plugin may " +
                     "have consumed it before submitting the job (update the tunasync-unity-mcp " +
                     "server to this plugin's version), or UNITY_MCP_ARM_FILE differs between " +
                     "the server and the Unity Editor.";

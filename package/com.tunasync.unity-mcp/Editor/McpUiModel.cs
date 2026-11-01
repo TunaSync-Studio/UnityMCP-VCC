@@ -120,6 +120,7 @@ namespace TunaSync.UnityMCP.Editor
         {
             string path = UploadArmPath;
             Directory.CreateDirectory(Path.GetDirectoryName(path));
+            UploadArmClaim.ClearLeftoverLock(path);
             File.WriteAllText(path,
                 "Human operator armed one VRC upload at " + DateTime.UtcNow.ToString("o") + "\n");
         }
@@ -128,6 +129,7 @@ namespace TunaSync.UnityMCP.Editor
         {
             string path = UploadArmPath;
             if (File.Exists(path)) File.Delete(path);
+            UploadArmClaim.ClearLeftoverLock(path);
         }
 
         private static string ProjectRelativePath(string path)

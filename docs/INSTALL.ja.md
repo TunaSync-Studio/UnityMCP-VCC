@@ -152,6 +152,7 @@ New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 **AI に作らせないでください** — 人間がボタンに触れたこと自体が、このゲートの
 意味です。
 
-アップロードが動いていないのに「arm claim lock is held」で実アップロードが
-拒否される場合 (エディタが異常終了した後など) は、arm ファイルと同じ場所にある
-`vrc-upload.arm.lock` を削除してから arm し直してください。
+「arm claim lock is held」で実アップロードが拒否され続ける場合 (エディタが
+異常終了した後など) は、Creator Console で許可を解除してから arm し直すか、
+`tools/arm-vrc-upload.bat` を実行してください。どちらも arm ファイルと同じ
+場所に残った `vrc-upload.arm.lock` を削除します。

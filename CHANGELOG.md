@@ -29,12 +29,23 @@ package version.
   ignored), and an arm stamped more than a minute in the future (the
   clock was set back after arming) is refused by both the server and the
   plugin instead of outliving its TTL.
+- The feature check is bound to the connection that carries the real
+  upload: `job.submit` is sent with `requireWelcome` (new `CallOptions`
+  field), so if the editor reconnects to a plugin build without
+  `vrcUploadArmClaim` between the check and the submit, the client refuses
+  to send (`PLUGIN_UPDATE_REQUIRED`, arm untouched) instead of trusting
+  the earlier check. The pre-check waits as long as `job.submit` used to
+  (15 s), so a reload in progress is waited out as before.
+- A claim lock left behind by a crashed editor no longer needs manual
+  cleanup: arming or disarming (Creator Console, `tools/*.bat`) removes it.
 - Tests: the server arm tests now emulate the plugin-side gate of each
   plugin generation (claim / read-only check / none); the old test only
   asserted that the server deleted the file, which is how the conflict
   with the plugin-side check went unnoticed. New Unity EditMode tests
   (`UploadArmClaimTests`) cover the claim itself, including racing
-  claimants.
+  claimants; `featureContract.test.ts` pins the `vrcUploadArmClaim`
+  string across server and plugin in CI; `requireWelcome.test.ts` covers
+  the send-time check, including a reload into a downgraded build.
 
 ### Changed
 - **Real uploads need the server and the Unity package from the same

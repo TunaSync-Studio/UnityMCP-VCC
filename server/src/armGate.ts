@@ -135,10 +135,11 @@ export function armRequiredResult(arm: ArmCheck): CallToolResult {
 export function armClaimUnsupportedResult(pluginVersion: string | null): CallToolResult {
   const message =
     `The connected Unity plugin (com.tunasync.unity-mcp ${pluginVersion ?? "unknown version"}) ` +
-    "does not consume the vrc_upload arm itself, which this server requires for a real " +
-    `upload. Update the Unity package to ${SERVER_VERSION} (the same version as this ` +
-    "server) and retry. Nothing was submitted and the arm file was not used; " +
-    "dry_run:true still works.";
+    `does not advertise the "${ARM_CLAIM_FEATURE}" feature: it does not consume the ` +
+    "vrc_upload arm itself, which this server requires for a real upload. Update the " +
+    "Unity package to the release that ships with this server " +
+    `(tunasync-unity-mcp ${SERVER_VERSION}) and retry. Nothing was submitted and the ` +
+    "arm file was not used; dry_run:true still works.";
   return {
     content: [
       { type: "text", text: `[PLUGIN_UPDATE_REQUIRED] ${message}` },

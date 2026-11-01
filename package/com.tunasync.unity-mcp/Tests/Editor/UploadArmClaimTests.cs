@@ -38,6 +38,14 @@ namespace TunaSync.UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void WelcomeAdvertisesTheArmClaim()
+        {
+            // The server submits real uploads only to plugins that advertise
+            // this exact string (server/src/armGate.ts ARM_CLAIM_FEATURE).
+            CollectionAssert.Contains(SysHandlers.BuildFeatures(), "vrcUploadArmClaim");
+        }
+
+        [Test]
         public void MissingArmIsNotClaimed()
         {
             Assert.AreEqual(UploadArmClaim.NotFound, UploadArmClaim.TryClaim(arm, 30));
@@ -118,6 +126,21 @@ namespace TunaSync.UnityMCP.Editor.Tests
             StringAssert.Contains("lock is held", state);
             Assert.IsTrue(File.Exists(arm), "a refused claim must not consume the arm");
             Assert.IsTrue(File.Exists(arm + ".lock"), "someone else's lock is left alone");
+        }
+
+        [Test]
+        public void LeftoverLockIsClearedByTheHumanArmActions()
+        {
+            // Arm/Disarm (Creator Console, tools/*.bat) clear a lock left behind
+            // by a crashed editor; until then every claim is refused.
+            File.WriteAllText(arm, "armed");
+            File.WriteAllText(UploadArmClaim.LockPathFor(arm), "");
+            StringAssert.Contains("lock is held", UploadArmClaim.TryClaim(arm, 30));
+            UploadArmClaim.ClearLeftoverLock(arm);
+            Assert.IsFalse(File.Exists(UploadArmClaim.LockPathFor(arm)));
+            Assert.IsNull(UploadArmClaim.TryClaim(arm, 30));
+            UploadArmClaim.ClearLeftoverLock(arm); // nothing left to clear: no-op
+            Assert.AreEqual(0, Directory.GetFiles(dir).Length);
         }
 
         [Test]

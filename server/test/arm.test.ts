@@ -20,6 +20,9 @@ import { MockPlugin, type MockPluginOptions } from "./mock-plugin.js";
 
 interface Harness {
   mock: MockPlugin;
+  /** The live options object the mock reads (mutate it to swap plugin builds). */
+  pluginOpts: MockPluginOptions;
+  pool: ProjectPool;
   armFile: string;
   callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResult>;
   cleanup: () => Promise<void>;
@@ -36,9 +39,11 @@ const ARM_CLAIM_FEATURE = "vrcUploadArmClaim";
  */
 type PluginKind = "claim" | "readOnlyCheck" | "noCheck";
 
+// Never equal to SERVER_VERSION, so "the message names the plugin version"
+// cannot pass on the server version that the message also names.
 const OLD_PLUGIN_VERSION: Record<Exclude<PluginKind, "claim">, string> = {
-  readOnlyCheck: "2.6.8",
-  noCheck: "2.6.6",
+  readOnlyCheck: "2.6.7-mock",
+  noCheck: "2.6.6-mock",
 };
 
 async function setup(
@@ -53,7 +58,8 @@ async function setup(
       : kind === "readOnlyCheck"
         ? { pluginVersion: OLD_PLUGIN_VERSION.readOnlyCheck, armGate: { file: armFile, mode: "check" } }
         : { pluginVersion: OLD_PLUGIN_VERSION.noCheck };
-  const mock = new MockPlugin({ registryDir: tmp, ...pluginOpts, ...extra });
+  const liveOpts: MockPluginOptions = { registryDir: tmp, ...pluginOpts, ...extra };
+  const mock = new MockPlugin(liveOpts);
   await mock.start();
   const cfg: Config = {
     projectSelector: undefined,
@@ -69,6 +75,8 @@ async function setup(
   await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
   return {
     mock,
+    pluginOpts: liveOpts,
+    pool,
     armFile,
     callTool: async (name, args) =>
       (await mcp.callTool({ name, arguments: args }, undefined, {})) as CallToolResult,
@@ -163,6 +171,62 @@ describe("vrc_upload human arm gate", () => {
     expect(refused).toHaveLength(1);
     expect(textOf(refused[0]!)).toMatch(/arm/i);
     expect(fs.existsSync(h.armFile)).toBe(false);
+    // Both passed the server's read-only pre-check: the plugin-side claim is
+    // what arbitrated, not the server.
+    expect(submitCount(h.mock)).toBe(2);
+  });
+
+  it("binds the feature check to the job.submit of a real upload (not of a dry run)", async () => {
+    h = await setup();
+    const { client } = h.pool.resolve(undefined);
+    const submits: Array<{ dryRun: unknown; requireWelcome: unknown }> = [];
+    const original = client.call.bind(client);
+    (client as unknown as { call: typeof client.call }).call = (method, params, opts) => {
+      if (method === "job.submit") {
+        const inner = (params as { params: { dryRun: unknown } }).params;
+        submits.push({ dryRun: inner.dryRun, requireWelcome: opts?.requireWelcome });
+      }
+      return original(method, params, opts);
+    };
+    await h.callTool("vrc_upload", { target: "avatar", dry_run: true, timeout_ms: 2_000 });
+    fs.writeFileSync(h.armFile, "armed by test");
+    const res = await h.callTool("vrc_upload", REAL_UPLOAD);
+    expect(res.isError ?? false, textOf(res)).toBe(false);
+    expect(submits).toHaveLength(2);
+    expect(submits[0]!.dryRun).toBe(true);
+    expect(submits[0]!.requireWelcome).toBeUndefined();
+    expect(submits[1]!.dryRun).toBe(false);
+    const predicate = submits[1]!.requireWelcome as (w: unknown) => boolean;
+    expect(typeof predicate).toBe("function");
+    expect(predicate(client.getWelcome())).toBe(true);
+    expect(predicate({ ...client.getWelcome()!, features: [] })).toBe(false);
+  });
+
+  it("a domain reload into a plugin that claims the arm: the real upload still completes", async () => {
+    h = await setup();
+    await h.callTool("vrc_upload", { target: "avatar", dry_run: true, timeout_ms: 2_000 });
+    await h.mock.simulateReload({ resumeMs: 200, resumeHintMs: 100 });
+    fs.writeFileSync(h.armFile, "armed by test");
+    const res = await h.callTool("vrc_upload", REAL_UPLOAD);
+    expect(res.isError ?? false, textOf(res)).toBe(false);
+    expect(fs.existsSync(h.armFile)).toBe(false);
+  });
+
+  it("a domain reload into a build without the claim (downgrade): refused, arm untouched", async () => {
+    h = await setup();
+    await h.callTool("vrc_upload", { target: "avatar", dry_run: true, timeout_ms: 2_000 });
+    // The editor comes back from the reload running a 2.6.7-2.6.8 style plugin.
+    h.pluginOpts.features = [];
+    h.pluginOpts.pluginVersion = OLD_PLUGIN_VERSION.readOnlyCheck;
+    h.pluginOpts.armGate = { file: h.armFile, mode: "check" };
+    await h.mock.simulateReload({ resumeMs: 200, resumeHintMs: 100 });
+    fs.writeFileSync(h.armFile, "armed by test");
+    const res = await h.callTool("vrc_upload", REAL_UPLOAD);
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain("PLUGIN_UPDATE_REQUIRED");
+    expect(textOf(res)).toContain(OLD_PLUGIN_VERSION.readOnlyCheck);
+    expect(fs.existsSync(h.armFile)).toBe(true);
+    expect(submitCount(h.mock)).toBe(1); // the dry run only
   });
 
   it("the server never consumes the arm, even when the plugin refuses", async () => {

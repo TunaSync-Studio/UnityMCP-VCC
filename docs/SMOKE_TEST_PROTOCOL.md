@@ -56,6 +56,18 @@ run and the tests are silently skipped (exit code 0, no results XML).
   prefab still healthy after editor restart.
 - `vrc_upload {dry_run:true}`: structured {valid, issues[]} on a real
   descriptor. REAL upload is never part of the gate (publishes content).
+- Arm gate end to end, without publishing: Disarm in Creator Console first
+  (no `vrc-upload.arm` and no `vrc-upload.arm.lock` at the default path)
+  and make sure the Unity Editor's environment has no `UNITY_MCP_ARM_FILE`.
+  Start the MCP server with `UNITY_MCP_ARM_FILE` pointing at a separate
+  file (e.g. `%TEMP%\unitymcp-smoke.arm`) and create that file. Then
+  `vrc_upload {target:"avatar", confirm:true}` must be refused by the
+  plugin with "arm file not found" (the server's pre-check passed, the
+  plugin looked at the default path), and `%TEMP%\unitymcp-smoke.arm` must
+  still exist (the server never consumes the arm). The plugin never sees an
+  arm here, so nothing can be published. Delete the smoke file afterwards.
+- EditMode `UploadArmClaimTests` pass on Windows (the claim lock under
+  Windows file semantics, racing claimants included).
 
 ## 5. Migration / coexistence (scratch copy of a real project)
 

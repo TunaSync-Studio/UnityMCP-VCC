@@ -9,7 +9,7 @@ import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/m
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "../config.js";
 import { UnityMcpError, hintFor, makeError, toUnityMcpError } from "../errors.js";
-import type { ErrorObj } from "../protocol.js";
+import type { ErrorObj, WelcomePayload } from "../protocol.js";
 import type { RecipeLibrary } from "../recipes.js";
 import type { UnityClient } from "../unity/client.js";
 import type { ProjectPool } from "../unity/pool.js";
@@ -332,18 +332,28 @@ async function refuseWithoutArmClaim(
   client: UnityClient,
   signal: AbortSignal,
 ): Promise<CallToolResult | null> {
-  await client.call("sys.status", {}, { timeoutMs: LIGHT_CALL_TIMEOUT_MS, signal });
+  // Submit-sized budget: this call stands in for the old first round trip, so
+  // a reload that job.submit would have waited out does not time out here.
+  await client.call("sys.status", {}, { timeoutMs: JOB_SUBMIT_TIMEOUT_MS, signal });
   const welcome = client.getWelcome();
-  if (
-    welcome !== null &&
-    Array.isArray(welcome.features) &&
-    welcome.features.includes(ARM_CLAIM_FEATURE)
-  ) {
-    return null;
-  }
-  return armClaimUnsupportedResult(
-    typeof welcome?.plugin?.version === "string" ? welcome.plugin.version : null,
-  );
+  if (welcome !== null && pluginClaimsArm(welcome)) return null;
+  return armClaimUnsupportedResult(pluginVersionOf(welcome));
+}
+
+/** Welcome predicate: this plugin consumes the vrc_upload arm itself. */
+function pluginClaimsArm(welcome: WelcomePayload): boolean {
+  return Array.isArray(welcome.features) && welcome.features.includes(ARM_CLAIM_FEATURE);
+}
+
+function pluginVersionOf(welcome: WelcomePayload | null): string | null {
+  return typeof welcome?.plugin?.version === "string" ? welcome.plugin.version : null;
+}
+
+/** The client refused to send because CallOptions.requireWelcome was unmet. */
+function isUnmetWelcome(err: unknown): boolean {
+  if (!(err instanceof UnityMcpError) || err.code !== "VERSION_UNSUPPORTED") return false;
+  const detail = err.obj.detail as { precondition?: unknown } | undefined;
+  return detail?.precondition === "requireWelcome";
 }
 
 async function runJob(
@@ -353,11 +363,16 @@ async function runJob(
   timeoutMs: number,
   bridge: ProgressBridge,
   signal: AbortSignal,
+  submitRequireWelcome?: (welcome: WelcomePayload) => boolean,
 ): Promise<CallToolResult> {
   const submitted = await client.call(
     "job.submit",
     { method, params },
-    { timeoutMs: JOB_SUBMIT_TIMEOUT_MS, signal },
+    {
+      timeoutMs: JOB_SUBMIT_TIMEOUT_MS,
+      signal,
+      ...(submitRequireWelcome !== undefined ? { requireWelcome: submitRequireWelcome } : {}),
+    },
   );
   const jobId = extractJobId(submitted);
   if (jobId === null) {
@@ -1002,7 +1017,14 @@ const toolTable: readonly ToolRegistrar[] = [
           args.timeout_ms,
           bridge,
           extra.signal,
+          // Bind the feature check to the connection that carries the submit:
+          // if the plugin was swapped in between (reconnect to another build),
+          // the client refuses to send instead of trusting the earlier check.
+          args.dry_run ? undefined : pluginClaimsArm,
         );
+      } catch (err) {
+        if (isUnmetWelcome(err)) return armClaimUnsupportedResult(pluginVersionOf(client.getWelcome()));
+        throw err;
       } finally {
         bridge.done();
       }

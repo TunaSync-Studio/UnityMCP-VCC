@@ -149,9 +149,10 @@ retry. Calls refused before that point (missing `confirm`, outdated
 plugin) and `dry_run` leave it in place. Never let the AI create
 it — the whole point is that a human touched the button.
 
-If a real upload is refused with "arm claim lock is held" while no upload
-is running (for example after an editor crash), delete
-`vrc-upload.arm.lock` next to the arm file and arm again.
+If real uploads keep being refused with "arm claim lock is held" (for
+example after an editor crash), disarm and arm again in Creator Console, or
+run `tools/arm-vrc-upload.bat`; both remove the leftover
+`vrc-upload.arm.lock` next to the arm file.
 
 ## 日本語版
 

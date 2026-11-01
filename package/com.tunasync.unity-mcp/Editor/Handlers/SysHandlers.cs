@@ -63,7 +63,7 @@ namespace TunaSync.UnityMCP.Editor
         }
 
         /// <summary>Capability introspection for clients. Static per compile (versionDefines).</summary>
-        private static string[] BuildFeatures()
+        internal static string[] BuildFeatures()
         {
             var features = new System.Collections.Generic.List<string>
             {

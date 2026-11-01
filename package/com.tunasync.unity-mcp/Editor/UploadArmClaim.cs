@@ -30,6 +30,33 @@ namespace TunaSync.UnityMCP.Editor
         // File.GetLastWriteTimeUtc's answer for a file that does not exist.
         private static readonly DateTime MissingFileTime = DateTime.FromFileTimeUtc(0);
 
+        /// <summary>The claim lock that sits next to the arm file.</summary>
+        internal static string LockPathFor(string armFile)
+        {
+            return armFile + ".lock";
+        }
+
+        /// <summary>
+        /// HUMAN OPERATOR ACTIONS ONLY (arm / disarm). A claim holds the lock
+        /// only for the instant of its check-and-delete, so a lock a human runs
+        /// into was left behind by a crashed editor; it would refuse every
+        /// later claim. Never call this from an MCP handler.
+        /// </summary>
+        internal static void ClearLeftoverLock(string armFile)
+        {
+            string lockPath = LockPathFor(armFile);
+            try
+            {
+                if (File.Exists(lockPath)) File.Delete(lockPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
         /// <summary>
         /// UNITY_MCP_ARM_TTL_MIN read the way the server reads it: a positive,
         /// finite number of minutes, parsed culture-invariantly ("1.5" means
@@ -58,7 +85,7 @@ namespace TunaSync.UnityMCP.Editor
         {
             if (string.IsNullOrEmpty(file) || !File.Exists(file)) return NotFound;
 
-            string lockPath = file + ".lock";
+            string lockPath = LockPathFor(file);
             FileStream lockStream;
             try
             {
@@ -69,13 +96,15 @@ namespace TunaSync.UnityMCP.Editor
                 if (File.Exists(lockPath))
                 {
                     return "arm claim lock is held: another upload attempt is claiming this arm " +
-                        "right now, or a crashed editor left " + lockPath + " behind - if no " +
-                        "upload is running, delete that file and retry";
+                        "at this instant. If a retry a few seconds later still reports this, a " +
+                        "crashed editor left " + lockPath + " behind - the operator clears it by " +
+                        "disarming and arming again";
                 }
                 if (ex is UnauthorizedAccessException)
                 {
                     return "arm claim lock could not be created (UnauthorizedAccessException): " +
-                        "the folder of the arm file is not writable";
+                        "the folder of the arm file is not writable, or a claim lock released " +
+                        "just now is still being deleted - retry in a moment";
                 }
                 return "arm claim lock could not be created (" + ex.GetType().Name + "); another " +
                     "upload attempt may have claimed this arm just now";
@@ -92,6 +121,11 @@ namespace TunaSync.UnityMCP.Editor
                 try
                 {
                     File.Delete(file);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return "arm file could not be consumed (UnauthorizedAccessException): it is " +
+                        "read-only or access is denied - the operator has to delete it and arm again";
                 }
                 catch (Exception ex)
                 {
