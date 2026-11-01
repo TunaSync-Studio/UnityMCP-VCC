@@ -90,6 +90,18 @@ export interface MockPluginOptions {
   handlers?: Record<string, MockHandler>;
   /** Behavior of the built-in job engine, keyed by submitted job method. */
   jobBehaviors?: Record<string, MockJobBehavior>;
+  /** welcome.features; defaults to none. */
+  features?: string[];
+  /** welcome.plugin.version; defaults to "2.0.0-mock". */
+  pluginVersion?: string;
+  /**
+   * Emulates the plugin-side human arm gate of a real (non-dryRun) vrc.upload
+   * job when it runs (job.wait):
+   * - "claim": fixed plugin - atomically claims (rename, then delete) the arm
+   *   file; the job fails when the claim fails.
+   * - "check": 2.6.7-2.6.8 plugin - read-only existence check, never consumes.
+   */
+  armGate?: { file: string; mode: "claim" | "check" };
 }
 
 interface InFlight {
@@ -574,6 +586,11 @@ export class MockPlugin {
           throw new MockPluginError("TIMEOUT", `job ${jobId} still running after ${waitMs} ms`);
         }
         job.state = "running";
+        const armError = this.armGateError(job);
+        if (armError !== null) {
+          job.state = "failed";
+          return { jobId, method: job.method, state: "failed", error: armError };
+        }
         const steps = behavior.progressSteps ?? 2;
         for (let i = 1; i <= steps; i++) {
           ctx.progress({ pct: Math.round((i / steps) * 100), message: `step ${i}/${steps}` });
@@ -623,9 +640,39 @@ export class MockPlugin {
     }
   }
 
+  /** Plugin-side arm gate of a real vrc.upload (see MockPluginOptions.armGate). */
+  private armGateError(job: MockJob): ErrorObj | null {
+    const gate = this.opts.armGate;
+    if (gate === undefined || job.method !== "vrc.upload") return null;
+    const p = (typeof job.params === "object" && job.params !== null ? job.params : {}) as Record<
+      string,
+      unknown
+    >;
+    if (p.dryRun === true) return null;
+    const refuse = (state: string): ErrorObj => ({
+      code: "INVALID_PARAMS",
+      message:
+        "vrc.upload: a real upload additionally requires the human-created one-shot " +
+        `arm file (${gate.file}; ${state}).`,
+      retryable: false,
+    });
+    if (gate.mode === "check") {
+      return fs.existsSync(gate.file) ? null : refuse("arm file not found");
+    }
+    if (!fs.existsSync(gate.file)) return refuse("arm file not found");
+    const claimed = `${gate.file}.claimed-mock-${randomUUID()}`;
+    try {
+      fs.renameSync(gate.file, claimed);
+    } catch (err) {
+      return refuse(`arm file could not be claimed (${(err as NodeJS.ErrnoException).code ?? "error"})`);
+    }
+    fs.rmSync(claimed, { force: true });
+    return null;
+  }
+
   private welcomePayloadBase(): Omit<WelcomePayload, "v"> {
     return {
-      plugin: { version: "2.0.0-mock" },
+      plugin: { version: this.opts.pluginVersion ?? "2.0.0-mock" },
       unity: {
         version: "2022.3.22f1",
         projectPath: this.projectPath,
@@ -638,7 +685,7 @@ export class MockPlugin {
       },
       eval: { engine: "csc" },
       lease: {},
-      features: [],
+      features: [...(this.opts.features ?? [])],
     };
   }
 

@@ -15,7 +15,12 @@ import type { UnityClient } from "../unity/client.js";
 import type { ProjectPool } from "../unity/pool.js";
 import { makeProgressBridge, type ProgressBridge, type ToolExtra } from "./progress.js";
 import { enrichBusyModal, probeBlockedEditor } from "../unity/blockedProbe.js";
-import { armRequiredResult, checkArm, consumeArm } from "../armGate.js";
+import {
+  ARM_CLAIM_FEATURE,
+  armClaimUnsupportedResult,
+  armRequiredResult,
+  checkArm,
+} from "../armGate.js";
 import { serverIdentity } from "../version.js";
 import {
   VRC_GET_INSTALL_HINT,
@@ -312,6 +317,33 @@ async function waitForJob(
     }
     throw err;
   }
+}
+
+/**
+ * Real-upload precondition on the plugin side: it must claim the arm itself
+ * (ARM_CLAIM_FEATURE), because the server only pre-checks it. sys.status
+ * first (cheap, answered on the transport thread): it connects lazily -
+ * getWelcome() is null before the first connection - and while the client is
+ * reconnecting (domain reload, package update) it is held until the new
+ * connection's welcome is in. Fail-safe: no welcome or no feature = refuse.
+ * Returns the refusal, or null when the plugin claims the arm.
+ */
+async function refuseWithoutArmClaim(
+  client: UnityClient,
+  signal: AbortSignal,
+): Promise<CallToolResult | null> {
+  await client.call("sys.status", {}, { timeoutMs: LIGHT_CALL_TIMEOUT_MS, signal });
+  const welcome = client.getWelcome();
+  if (
+    welcome !== null &&
+    Array.isArray(welcome.features) &&
+    welcome.features.includes(ARM_CLAIM_FEATURE)
+  ) {
+    return null;
+  }
+  return armClaimUnsupportedResult(
+    typeof welcome?.plugin?.version === "string" ? welcome.plugin.version : null,
+  );
 }
 
 async function runJob(
@@ -896,8 +928,9 @@ const toolTable: readonly ToolRegistrar[] = [
       "requires BOTH confirm:true (ask the user for fresh approval of THIS " +
       "upload before setting it; a general request to work on the avatar is " +
       "not that approval) AND a human-created one-shot arm file " +
-      "(tools\\arm-vrc-upload.bat, TTL 30 min) " +
-      "- never create the arm file yourself. On wait timeout the job keeps " +
+      "(tools\\arm-vrc-upload.bat, TTL 30 min, consumed by the Unity plugin " +
+      "when the upload starts) - never create the arm file yourself. On wait " +
+      "timeout the job keeps " +
       "running and the jobId is reported for job_status.",
     {
       target: z.enum(["avatar", "world"]),
@@ -940,21 +973,19 @@ const toolTable: readonly ToolRegistrar[] = [
         };
       }
       // Second, independent gate: confirm proves caller intent, the arm file
-      // proves *operator* intent (one-shot, human-created, TTL-bound).
+      // proves *operator* intent (one-shot, human-created, TTL-bound). The
+      // server only pre-checks it; the plugin claims (consumes) it atomically
+      // right before the upload starts (L-3/M-1). Consuming it here too made
+      // the 2.6.7+ plugin-side gate refuse every real upload.
       if (!args.dry_run) {
         const arm = checkArm(ctx.cfg);
         if (!arm.armed) return armRequiredResult(arm);
-        // L-3: consume is an atomic claim now - if a concurrent call won the
-        // race between our check and here, this attempt is NOT armed.
-        if (!consumeArm(arm.file)) {
-          return armRequiredResult({
-            armed: false,
-            file: arm.file,
-            detail: "arm was consumed by a concurrent attempt",
-          });
-        }
       }
       const { client } = ctx.pool.resolve(args.project);
+      if (!args.dry_run) {
+        const refused = await refuseWithoutArmClaim(client, extra.signal);
+        if (refused !== null) return refused;
+      }
       const bridge = makeProgressBridge(extra);
       try {
         return await runJob(

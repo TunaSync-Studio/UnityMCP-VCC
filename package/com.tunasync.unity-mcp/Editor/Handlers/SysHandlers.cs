@@ -68,6 +68,10 @@ namespace TunaSync.UnityMCP.Editor
             var features = new System.Collections.Generic.List<string>
             {
                 "state", "scene", "capture", "wake",
+                // vrc.upload claims (consumes) the human arm file itself, right
+                // before a real upload. The server submits real uploads only to
+                // plugins that advertise this, and no longer consumes the arm.
+                "vrcUploadArmClaim",
             };
 #if MCP_NDMF
             features.Add("ndmf");

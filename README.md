@@ -148,10 +148,13 @@ rest; recipes are also exposed as MCP resources
   path are both verified live on a real avatar project (2026-08-06); the
   world `dry_run` path is verified live on a published world (2026-08-07).
   A real upload is double-gated — `confirm:true` (caller intent) **and** a
-  human-created one-shot arm file (TTL 30 min, atomically consumed per
-  attempt) — and since v2.6.7 the arm file is checked **inside the editor
-  plugin too**, so even a client that bypasses this server cannot publish
-  unattended. Arming without a repo checkout: see
+  human-created one-shot arm file (TTL 30 min). The **editor plugin itself**
+  checks the arm and consumes it atomically right before the upload starts
+  (one arm = one attempt), so even a client that bypasses this server cannot
+  publish unattended. Keep the server and the Unity package on the same
+  release: the server refuses real uploads to a plugin that does not consume
+  the arm itself (`PLUGIN_UPDATE_REQUIRED`; `dry_run` is unaffected).
+  Arming without a repo checkout: see
   `docs/INSTALL.md` § "Arming a real VRChat upload".
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks the destructive /
   publishing tools and masks user paths in all output for screen-shared

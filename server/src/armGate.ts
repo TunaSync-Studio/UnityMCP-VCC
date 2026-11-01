@@ -3,10 +3,16 @@
 // confirm:true alone is an AI-settable parameter, so it proves intent of the
 // *caller*, not of the human operator. A REAL vrc_upload therefore also
 // requires a one-shot arm file that only the human operator is supposed to
-// create (tools\arm-vrc-upload.bat). The file expires after a TTL and is
-// consumed (deleted, best-effort) when a real upload attempt starts, so one
-// arm buys one armed attempt window; if the delete is racing/locked the TTL
-// still bounds it.
+// create (tools\arm-vrc-upload.bat). The file expires after a TTL.
+//
+// Who consumes it: the Unity plugin, and only the plugin. Right before a real
+// upload starts it claims the arm atomically (rename, then delete), so one arm
+// buys exactly one attempt even under concurrent calls (L-3) and a client
+// driving the plugin directly cannot skip it (M-1). The server only
+// pre-checks the arm (read-only) to refuse early without submitting a job, and
+// submits real uploads only to plugins that advertise ARM_CLAIM_FEATURE.
+// (Through 2.6.8 the server consumed the arm before submitting the job while
+// 2.6.7+ plugins also required it, so every real upload was refused.)
 //
 // This is an intent marker, not a cryptographic barrier: any process with
 // filesystem access could technically create the file. Its purpose is to keep
@@ -21,7 +27,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "./config.js";
-import { serverIdentity } from "./version.js";
+import { SERVER_VERSION, serverIdentity } from "./version.js";
 
 export const DEFAULT_ARM_TTL_MS = 30 * 60 * 1000;
 
@@ -66,34 +72,21 @@ export function checkArm(
 }
 
 /**
- * One-shot: claim the arm file when an attempt starts. L-3 (audit): a plain
- * unlink let two concurrent calls both pass the check and both "consume" the
- * same arm. rename is atomic on one volume - exactly one caller wins; the
- * loser sees false and must answer ARM_REQUIRED. Returns true when this
- * caller claimed the arm.
+ * welcome.features entry of a plugin whose vrc.upload claims (consumes) the
+ * arm itself. The server never consumes the arm, so it must not submit a real
+ * upload to a plugin without this feature: <= 2.6.6 would upload without
+ * using the arm up, 2.6.7-2.6.8 would refuse it.
  */
-export function consumeArm(file: string): boolean {
-  const claimed = `${file}.claimed-${process.pid}-${Date.now()}`;
-  try {
-    fs.renameSync(file, claimed);
-  } catch {
-    return false; // already claimed / already gone
-  }
-  try {
-    fs.unlinkSync(claimed);
-  } catch {
-    // claim succeeded; leftover tmp is harmless and outside the arm path
-  }
-  return true;
-}
+export const ARM_CLAIM_FEATURE = "vrcUploadArmClaim";
 
 export function armRequiredResult(arm: ArmCheck): CallToolResult {
   const message =
     `A real vrc_upload additionally requires a human-created ` +
     `one-shot arm file: ${arm.file} (${arm.detail}). ` +
     "The human operator arms it by running tools\\arm-vrc-upload.bat " +
-    "(TTL 30 min, consumed per attempt). If you are an AI agent: do NOT " +
-    "create this file yourself - stop and ask the operator to arm, then retry.";
+    "(TTL 30 min, consumed by the Unity plugin when the upload starts). If " +
+    "you are an AI agent: do NOT create this file yourself - stop and ask the " +
+    "operator to arm, then retry.";
   // F-17: hand-built early-return errors carry the same server identity block
   // as fail() responses - this is exactly the moment a caller needs to know
   // which server/build refused the upload.
@@ -109,6 +102,42 @@ export function armRequiredResult(arm: ArmCheck): CallToolResult {
               message,
               retryable: false,
               detail: { file: arm.file, state: arm.detail },
+            },
+            server: serverIdentity(),
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    isError: true,
+  };
+}
+
+/**
+ * Refusal for a real upload to a plugin without ARM_CLAIM_FEATURE. Nothing was
+ * submitted and the arm was not touched, so it stays usable until its TTL
+ * once the plugin is updated.
+ */
+export function armClaimUnsupportedResult(pluginVersion: string | null): CallToolResult {
+  const message =
+    `The connected Unity plugin (com.tunasync.unity-mcp ${pluginVersion ?? "unknown version"}) ` +
+    "does not consume the vrc_upload arm itself, which this server requires for a real " +
+    `upload. Update the Unity package to ${SERVER_VERSION} (the same version as this ` +
+    "server) and retry. Nothing was submitted and the arm file was not used; " +
+    "dry_run:true still works.";
+  return {
+    content: [
+      { type: "text", text: `[PLUGIN_UPDATE_REQUIRED] ${message}` },
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            error: {
+              code: "PLUGIN_UPDATE_REQUIRED",
+              message,
+              retryable: false,
+              detail: { pluginVersion, requiredFeature: ARM_CLAIM_FEATURE },
             },
             server: serverIdentity(),
           },

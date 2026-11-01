@@ -90,8 +90,8 @@ long NDMF/upload waits, set `tool_timeout_sec = 1300` in the server's
 | `UNITY_MCP_DEFAULT_TIMEOUT_MS` | `60000` | Default per-call timeout |
 | `UNITY_MCP_STREAM_MODE` | off | `1` = streaming mode: lock destructive/publishing tools, mask user paths in output |
 | `UNITY_MCP_STREAM_MASK` | (none) | Extra literal terms to mask, `;`-separated |
-| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` | Human arm file required (with `confirm:true`) for a real `vrc_upload` |
-| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed per attempt) |
+| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` | Human arm file required (with `confirm:true`) for a real `vrc_upload`. The server only pre-checks it; the Unity plugin consumes it and reads this variable from the **Unity Editor's** environment, so an override must be set for both processes (the Creator Console arm button always uses the default path) |
+| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed by the plugin per attempt; same both-processes rule) |
 
 ## Tools
 

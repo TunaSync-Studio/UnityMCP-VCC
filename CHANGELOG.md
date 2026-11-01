@@ -6,6 +6,33 @@ package version.
 
 ## [Unreleased]
 
+### Fixed
+- **Every MCP-driven real `vrc_upload` was refused (2.6.7–2.6.8)**: the
+  npm server consumed the human arm file before submitting the job, and
+  the plugin-side arm check added in 2.6.7 (M-1) then found no file, so
+  the job always failed with "arm file not found" (fail-safe — nothing
+  was published, but the arm was used up). The Unity plugin is now the
+  single consumer: right before the upload starts it claims the arm
+  atomically (rename, then delete) and checks the TTL on the claimed
+  file. One arm still buys exactly one attempt, also under concurrent
+  calls (L-3), and a client that bypasses the server still cannot skip
+  it (M-1). The server only pre-checks the arm (early `ARM_REQUIRED`
+  without submitting anything) and never consumes it. The Creator
+  Console arm dialog now says the plugin consumes the arm.
+- Tests: the arm tests now emulate the plugin-side gate of each plugin
+  generation (claim / read-only check / none). The old test only
+  asserted that the server deleted the file, which is how the conflict
+  with the plugin-side check went unnoticed.
+
+### Changed
+- **Real uploads need the server and the Unity package from the same
+  release**: the plugin advertises the `vrcUploadArmClaim` feature, and
+  the server submits a real upload only to a plugin that advertises it.
+  Otherwise it answers `PLUGIN_UPDATE_REQUIRED` (not retryable; nothing
+  submitted, the arm left in place; `dry_run` is unaffected). An older
+  server with the new plugin also fails safe: the plugin refuses with
+  "arm file not found" and a hint to update the server.
+
 ## [2.6.8] - 2026-08-12
 
 Unity plugin + npm server release: the audit's remaining actionable

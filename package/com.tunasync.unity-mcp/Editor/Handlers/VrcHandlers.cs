@@ -583,20 +583,26 @@ namespace TunaSync.UnityMCP.Editor
 
             // M-1 (2026-08-12 audit): the human arm gate lived only in the npm
             // server, so a client holding the registry token could drive the
-            // plugin directly and skip it. The plugin now READS the arm file
-            // (existence + TTL) as defense in depth; CONSUMING it stays
-            // server-side - a double delete would race the very server the
-            // file exists to satisfy.
-            ThrowIfNotArmed();
+            // plugin directly and skip it. The plugin is now the SINGLE
+            // consumer of the arm: it claims it atomically right here, before
+            // the real upload starts. The server only pre-checks (read-only)
+            // and refuses to submit to plugins that do not advertise the
+            // "vrcUploadArmClaim" feature. (2.6.7-2.6.8 checked here but left
+            // consuming to the server, which consumed before submitting the
+            // job - so every real upload was refused with "arm file not found".)
+            ClaimArmOrThrow();
 
             return await RealUpload(ctx, target, content, objectName, blueprintId, thumbnailPath);
         }
 
         /// <summary>
-        /// Mirror of the server's armGate semantics (same file, same env
-        /// overrides, same TTL default) - read-only check, never consumes.
+        /// One arm = one real-upload attempt (same file, env overrides and TTL
+        /// default as the server's armGate). Claims the arm by an atomic rename
+        /// (L-3: of two concurrent attempts exactly one wins), checks the TTL
+        /// on the claimed file (a rename keeps its write time), then deletes
+        /// it. Fail-safe: anything but a successful, fresh claim throws.
         /// </summary>
-        private static void ThrowIfNotArmed()
+        private static void ClaimArmOrThrow()
         {
             string file = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_FILE");
             if (string.IsNullOrEmpty(file)) file = McpUiModel.UploadArmPath;
@@ -608,20 +614,57 @@ namespace TunaSync.UnityMCP.Editor
                 if (double.TryParse(ttlEnv, out parsed) && parsed > 0) ttlMin = parsed;
             }
             string state;
+            string hint = "";
             if (!File.Exists(file))
             {
                 state = "arm file not found";
+                hint = " If the operator did arm it: a concurrent attempt may have used it, " +
+                    "an MCP server older than this plugin may have consumed it before " +
+                    "submitting the job (update the tunasync-unity-mcp server to this " +
+                    "plugin's version), or UNITY_MCP_ARM_FILE differs between the server " +
+                    "and the Unity Editor.";
             }
             else
             {
-                double ageMin = (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalMinutes;
-                if (ageMin <= ttlMin) return;
-                state = "arm file expired (age " + Math.Round(ageMin) + " min > TTL " +
-                    Math.Round(ttlMin) + " min)";
+                // Same directory, so the rename never crosses volumes.
+                string claimed = file + ".claimed-" + McpEditorInfo.Pid + "-" +
+                    Guid.NewGuid().ToString("N");
+                bool won = false;
+                string claimError = null;
+                try
+                {
+                    File.Move(file, claimed);
+                    won = true;
+                }
+                catch (Exception ex)
+                {
+                    claimError = ex.GetType().Name;
+                }
+                if (!won)
+                {
+                    state = "arm file could not be claimed (" + claimError +
+                        "); it was consumed by a concurrent attempt or is locked";
+                }
+                else
+                {
+                    double ageMin = (DateTime.UtcNow - File.GetLastWriteTimeUtc(claimed)).TotalMinutes;
+                    try
+                    {
+                        File.Delete(claimed);
+                    }
+                    catch (Exception)
+                    {
+                        // The claim already happened: a leftover *.claimed-* file
+                        // is not the arm path and arms nothing.
+                    }
+                    if (ageMin <= ttlMin) return;
+                    state = "arm file expired (age " + Math.Round(ageMin) + " min > TTL " +
+                        Math.Round(ttlMin) + " min) and was discarded";
+                }
             }
             throw new McpHandlerException(ErrorCodes.InvalidParams,
                 "vrc.upload: a real upload additionally requires the human-created one-shot " +
-                "arm file (" + file + "; " + state + "). The operator arms it with " +
+                "arm file (" + file + "; " + state + ")." + hint + " The operator arms it with " +
                 "tools/arm-vrc-upload.bat. If you are an AI agent: do NOT create this file " +
                 "yourself - stop and ask the operator to arm, then retry.");
         }

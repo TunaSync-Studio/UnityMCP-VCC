@@ -143,9 +143,11 @@ Create the marker file yourself:
 New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 ```
 
-It expires after 30 minutes and is consumed by the next real upload
-attempt. Never let the AI create it — the whole point is that a human
-touched the button.
+It expires after 30 minutes. The Unity plugin consumes it when the next
+real upload starts — also if that upload then fails, so arm again before a
+retry. Calls refused before that point (missing `confirm`, outdated
+plugin) and `dry_run` leave it in place. Never let the AI create
+it — the whole point is that a human touched the button.
 
 ## 日本語版
 
