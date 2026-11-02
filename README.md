@@ -137,7 +137,8 @@ rest; recipes are also exposed as MCP resources
   present a token that only your OS user can read.
 - **Platform**: developed and verified on **Windows**. The pieces that were
   Windows-hardcoded now handle POSIX (extensionless `dotnet` probe for eval,
-  `UNITY_MCP_REGISTRY_DIR` on both sides, chmod-tightened token files), but
+  matching registry/arm folders on both sides by default - `$XDG_DATA_HOME`
+  or `~/.local/share` - chmod-tightened token files), but
   macOS/Linux have not been exercised on real machines yet — treat them as
   best-effort.
 - **Unity**: verified on **2022.3.22f1** (VRChat's version). Other 2022.3
@@ -148,11 +149,16 @@ rest; recipes are also exposed as MCP resources
   path are both verified live on a real avatar project (2026-08-06); the
   world `dry_run` path is verified live on a published world (2026-08-07).
   A real upload is double-gated — `confirm:true` (caller intent) **and** a
-  human-created one-shot arm file (TTL 30 min, atomically consumed per
-  attempt) — and since v2.6.7 the arm file is checked **inside the editor
-  plugin too**, so even a client that bypasses this server cannot publish
-  unattended. Arming without a repo checkout: see
-  `docs/INSTALL.md` § "Arming a real VRChat upload".
+  human-created one-shot arm file (TTL 30 min). The **editor plugin itself**
+  checks the arm and consumes it right before the upload starts (one arm =
+  one attempt, also when attempts race), so a client that bypasses this
+  server cannot publish through `vrc.upload` without an arm either. The arm
+  is an intent marker, not a security boundary: code run inside the editor
+  (for example via `execute_editor_command`) is not gated by it. Keep the
+  server and the Unity package on the same release: the server refuses real
+  uploads to a plugin that does not consume the arm itself
+  (`PLUGIN_UPDATE_REQUIRED`; `dry_run` is unaffected). Arming without a repo
+  checkout: see `docs/INSTALL.md` § "Arming a real VRChat upload".
 - **Streaming mode**: `UNITY_MCP_STREAM_MODE=1` locks the destructive /
   publishing tools and masks user paths in all output for screen-shared
   sessions — `docs/STREAMING.md`.

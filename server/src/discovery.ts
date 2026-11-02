@@ -1,5 +1,6 @@
-// Registry discovery: scan %LOCALAPPDATA%\UnityMCP\registry\*.json for live
-// plugin listeners and resolve a project selector to exactly one entry.
+// Registry discovery: scan the registry folder (config.registryDir, e.g.
+// %LOCALAPPDATA%\UnityMCP\registry\*.json) for live plugin listeners and
+// resolve a project selector to exactly one entry.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -143,9 +144,44 @@ function throwUnresponsive(hits: DiscoveredProject[], now: number): never {
 }
 
 /**
+ * A selector with a path separator names a location, not a name fragment.
+ * Checked on the raw text: normalization strips a trailing separator, and
+ * "VRChat/" or "C:\\" must still count as paths.
+ */
+function isPathSelector(sel: string): boolean {
+  return /[\\/]/.test(sel);
+}
+
+/** "c:/x", "/home/x", "//server/share" (normalized): only that exact location. */
+function isAbsoluteSelector(normSel: string): boolean {
+  return normSel.startsWith("/") || /^[a-z]:(\/|$)/.test(normSel);
+}
+
+/**
+ * The selector names this project exactly:
+ * - an absolute path: that location and nothing else;
+ * - a relative path ("VRChat/Manuka", "Projects/Avatar"): whole folder names
+ *   inside the project path - never part of a folder name, so
+ *   "Projects/Avatar" cannot reach ".../Avatar2";
+ * - a bare name: the project folder or the project name, exactly.
+ */
+function namesExactly(e: RegistryEntry, normSel: string, sel: string): boolean {
+  const p = normalizeProjectPath(e.projectPath);
+  if (p === normSel) return true;
+  if (isPathSelector(sel)) {
+    if (isAbsoluteSelector(normSel)) return false;
+    return ("/" + p + "/").includes("/" + normSel + "/");
+  }
+  return p.endsWith("/" + normSel) || e.projectName.toLowerCase() === sel.toLowerCase();
+}
+
+/**
  * Resolve a selector to exactly one live registry entry.
- * Order: exact normalized path match -> substring match (path or name) ->
- * single-alive default. Throws PROJECT_AMBIGUOUS / PROJECT_NOT_FOUND.
+ * Order: exact (see namesExactly) ->
+ * the exactly named project exists but is down: report that, never a
+ * different project -> path selectors stop there -> name fragments fall back
+ * to substring match (path or name) -> single-alive default.
+ * Throws PROJECT_AMBIGUOUS / PROJECT_NOT_FOUND (or the F-12 blocked error).
  */
 export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
   const sel = selector ?? cfg.projectSelector;
@@ -156,8 +192,46 @@ export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
 
   if (sel !== undefined) {
     const normSel = normalizeProjectPath(sel);
-    const exact = alive.find((e) => normalizeProjectPath(e.projectPath) === normSel);
-    if (exact) return exact;
+    const exactAlive = alive.filter((e) => namesExactly(e, normSel, sel));
+    if (exactAlive.length === 1 && exactAlive[0]) return exactAlive[0];
+    if (exactAlive.length > 1) {
+      throw makeError(
+        "PROJECT_AMBIGUOUS",
+        `selector "${sel}" matches ${exactAlive.length} projects`,
+        { detail: { candidates: exactAlive.map((e) => candidateOf(e)) } },
+      );
+    }
+
+    // The exactly named project is registered but not reachable right now
+    // (blocked, restarting, exited). Say so - never substitute another
+    // project whose path or name merely contains the selector: a pooled
+    // client is pinned by full path and re-resolves on every reconnect, so a
+    // fuzzy fallback here silently moved it to e.g. ".../Avatar2".
+    const exactDown = scanned.filter((d) => !d.alive && namesExactly(d.entry, normSel, sel));
+    if (exactDown.length > 0) {
+      const blocked = exactDown.filter((d) => d.reason === "unresponsive");
+      if (blocked.length > 0) throwUnresponsive(blocked, now);
+      const message = exactDown.some((d) => d.reason === "schema_mismatch")
+        ? `the Unity project "${sel}" is registered by an incompatible plugin version ` +
+          "(registry schema mismatch) - update the Unity package"
+        : `the Unity project "${sel}" is not running (its editor exited)`;
+      throw makeError("PROJECT_NOT_FOUND", message, {
+        detail: {
+          candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),
+          registryDir: cfg.registryDir,
+        },
+      });
+    }
+
+    // A path names a location: no fuzzy fallback.
+    if (isPathSelector(sel)) {
+      throw makeError("PROJECT_NOT_FOUND", `no running Unity project at "${sel}"`, {
+        detail: {
+          candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),
+          registryDir: cfg.registryDir,
+        },
+      });
+    }
 
     const needle = sel.toLowerCase();
     const sub = alive.filter(

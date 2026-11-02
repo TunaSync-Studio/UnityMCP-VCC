@@ -43,6 +43,15 @@ export interface CallOptions {
   timeoutMs?: number;
   onProgress?: (p: ProgressPayload) => void;
   signal?: AbortSignal;
+  /**
+   * Send only over a connection whose welcome satisfies this predicate. It is
+   * evaluated when the request is actually written - right away, or when it
+   * leaves the hold queue after a reconnect - so a check made earlier against
+   * another connection's welcome cannot be outlived. Unmet: the call rejects
+   * with VERSION_UNSUPPORTED (detail.precondition "requireWelcome") and
+   * nothing is sent.
+   */
+  requireWelcome?: (welcome: WelcomePayload) => boolean;
 }
 
 export interface UnityClientHooks {
@@ -76,6 +85,7 @@ interface HoldEntry {
   onProgress?: (p: ProgressPayload) => void;
   signal?: AbortSignal;
   abortHandler?: () => void;
+  requireWelcome?: (welcome: WelcomePayload) => boolean;
 }
 
 export interface UnityClientStats {
@@ -196,9 +206,31 @@ export class UnityClient {
       payload: { method, params, timeoutMs },
     };
     if (this.stateValue === "ready" && this.conn !== null && this.pending.size < MAX_IN_FLIGHT) {
+      const unmet = this.unmetWelcome(opts?.requireWelcome);
+      if (unmet !== null) return Promise.reject(unmet);
       return this.sendNow(env, deadlineAt, opts);
     }
     return this.enqueue(env, deadlineAt, opts);
+  }
+
+  /** CallOptions.requireWelcome against the live connection's welcome. */
+  private unmetWelcome(
+    requireWelcome: ((welcome: WelcomePayload) => boolean) | undefined,
+  ): UnityMcpError | null {
+    if (requireWelcome === undefined) return null;
+    const welcome = this.welcomeValue;
+    if (welcome !== null && requireWelcome(welcome)) return null;
+    return makeError(
+      "VERSION_UNSUPPORTED",
+      "the connected Unity plugin does not meet this request's requirement " +
+        "(the connection changed after it was checked); nothing was sent",
+      {
+        detail: {
+          precondition: "requireWelcome",
+          pluginVersion: welcome?.plugin?.version ?? null,
+        },
+      },
+    );
   }
 
   dispose(): void {
@@ -281,6 +313,7 @@ export class UnityClient {
         reject,
         ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
         ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(opts?.requireWelcome ? { requireWelcome: opts.requireWelcome } : {}),
         timer: setTimeout(() => {
           if (this.removeHold(entry)) {
             reject(makeError("TIMEOUT", `timed out after ${holdMs} ms waiting for Unity`));
@@ -335,6 +368,11 @@ export class UnityClient {
       const remaining = entry.deadlineAt - Date.now();
       if (remaining <= 0) {
         entry.reject(makeError("TIMEOUT", "deadline passed while waiting for Unity"));
+        continue;
+      }
+      const unmet = this.unmetWelcome(entry.requireWelcome);
+      if (unmet !== null) {
+        entry.reject(unmet);
         continue;
       }
       const promise = this.pending.register(entry.env.id, {

@@ -7,7 +7,8 @@ logs, and search a built-in library of Unity/VRChat recipes.
 
 It pairs with the UnityMCP editor plugin (`com.tunasync.unity-mcp`), which
 hosts a TCP listener per Unity project. This server discovers running editors
-via a registry in `%LOCALAPPDATA%\UnityMCP\registry` and connects out to them.
+via a registry in `%LOCALAPPDATA%\UnityMCP\registry` (macOS/Linux:
+`~/.local/share/UnityMCP/registry`) and connects out to them.
 It survives domain reloads and editor restarts transparently.
 
 ## Status and scope
@@ -84,14 +85,14 @@ long NDMF/upload waits, set `tool_timeout_sec = 1300` in the server's
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `UNITY_MCP_PROJECT` | (auto) | Project path or name substring used when several Unity editors run at once |
+| `UNITY_MCP_PROJECT` | (auto) | Default project when several Unity editors run at once. An absolute path selects only that project; a relative path (anything with `/` or `\`) matches whole folder names inside a project path; a bare name selects the project whose name or folder is exactly that name, else a unique substring of a project path or name. A selector keeps meaning the project it first resolved to for the rest of the server session (while that editor is down, calls fail instead of switching to another project) |
 | `UNITY_MCP_RECIPES_DIR` | bundled `recipes/` | Override the recipe library location |
-| `UNITY_MCP_REGISTRY_DIR` | `%LOCALAPPDATA%\UnityMCP\registry` | Override the plugin discovery registry |
+| `UNITY_MCP_REGISTRY_DIR` | `%LOCALAPPDATA%\UnityMCP\registry` (macOS/Linux: `~/.local/share/UnityMCP/registry`, or under `$XDG_DATA_HOME`) | Override the plugin discovery registry. The default matches the plugin's on every platform; an override must be set for both the server and the Unity Editor |
 | `UNITY_MCP_DEFAULT_TIMEOUT_MS` | `60000` | Default per-call timeout |
 | `UNITY_MCP_STREAM_MODE` | off | `1` = streaming mode: lock destructive/publishing tools, mask user paths in output |
 | `UNITY_MCP_STREAM_MASK` | (none) | Extra literal terms to mask, `;`-separated |
-| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` | Human arm file required (with `confirm:true`) for a real `vrc_upload` |
-| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed per attempt) |
+| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` (macOS/Linux: `~/.local/share/UnityMCP/arm/vrc-upload.arm`, or under `$XDG_DATA_HOME`) | Human arm file required (with `confirm:true`) for a real `vrc_upload`. Absolute paths only (a relative value is ignored). The server only pre-checks it; the Unity plugin consumes it and, like its Creator Console and `tools/*-vrc-upload.bat`, reads this variable from its own environment - so an override must be set for both processes |
+| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes: a plain positive number, at most `1440` (one-shot; consumed by the plugin per attempt; same both-processes rule; Creator Console shows the effective value) |
 
 ## Tools
 

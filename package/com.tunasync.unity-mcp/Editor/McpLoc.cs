@@ -109,7 +109,8 @@ namespace TunaSync.UnityMCP.Editor
             ["btn.openRegistry"] = new[] { "Open discovery registry", "discovery registryを開く" },
             ["btn.openDocs"] = new[] { "Open documentation", "ドキュメントを開く" },
             ["btn.copySetup"] = new[] { "Copy setup", "設定をコピー" },
-            ["btn.armUpload"] = new[] { "Arm one upload (30 min)", "アップロード1回を許可 (30分)" },
+            // {0} = the arm lifetime in minutes (UNITY_MCP_ARM_TTL_MIN, default 30).
+            ["btn.armUpload"] = new[] { "Arm one upload ({0} min)", "アップロード1回を許可 ({0}分)" },
             ["btn.disarmUpload"] = new[] { "Disarm", "許可を解除" },
             ["dialog.cancelJob"] = new[]
             {
@@ -123,12 +124,18 @@ namespace TunaSync.UnityMCP.Editor
             },
             ["dialog.armUpload"] = new[]
             {
-                "HUMAN OPERATOR ACTION ONLY. Arm exactly one VRChat upload for up to 30 minutes? The server consumes the arm file when an upload begins. Review the active avatar/world and SDK state first.",
-                "人間オペレーター専用操作です。VRChatアップロード1回を最長30分だけ許可しますか？upload開始時にserverが許可ファイルを消費します。対象avatar/worldとSDK状態を先に確認してください。",
+                "HUMAN OPERATOR ACTION ONLY. Arm exactly one VRChat upload for up to {0} minutes? The Unity plugin consumes the arm file once the SDK builder is ready, right before the upload is built. Review the active avatar/world and SDK state first.",
+                "人間オペレーター専用操作です。VRChatアップロード1回を最長{0}分だけ許可しますか？SDKの準備ができてアップロードを組み立てる直前に、Unity側のpluginが許可ファイルを消費します。対象avatar/worldとSDK状態を先に確認してください。",
             },
             ["upload.disarmed"] = new[] { "DISARMED", "未許可" },
             ["upload.expired"] = new[] { "EXPIRED (not usable)", "期限切れ (使用不可)" },
             ["upload.armed"] = new[] { "ARMED for one upload", "アップロード1回を許可中" },
+            ["upload.file"] = new[] { "Arm file", "許可ファイル" },
+            ["upload.lockLeft"] = new[]
+            {
+                "A claim lock was left behind (an editor stopped while claiming the arm): every real upload is refused until it is cleared. Disarm or Arm clears it.",
+                "取得用のロックが残っています (arm の取得中にエディタが止まった可能性)。消えるまで実アップロードはすべて拒否されます。「許可を解除」か「許可」で消えます。",
+            },
             ["upload.explain"] = new[]
             {
                 "This UI does not expose an MCP arm method. Only a deliberate local click can create the one-shot arm file.",
@@ -153,7 +160,7 @@ namespace TunaSync.UnityMCP.Editor
             ["toast.healthCopied"] = new[] { "Health URL copied.", "ヘルスURLをコピーしました。" },
             ["toast.enabled"] = new[] { "Listener and registry started immediately.", "listenerとregistryを即時起動しました。" },
             ["toast.disabled"] = new[] { "Listener and registry stopped immediately.", "listenerとregistryを即時停止しました。" },
-            ["toast.uploadArmed"] = new[] { "One upload armed for 30 minutes.", "アップロード1回を30分間許可しました。" },
+            ["toast.uploadArmed"] = new[] { "One upload armed for {0} minutes.", "アップロード1回を{0}分間許可しました。" },
             ["toast.uploadDisarmed"] = new[] { "Upload gate disarmed.", "アップロード許可を解除しました。" },
         };
 

@@ -4,6 +4,7 @@
 import { normalizeProjectPath, type RegistryEntry } from "../protocol.js";
 import type { Config } from "../config.js";
 import { scanRegistry, resolveProject, type DiscoveredProject } from "../discovery.js";
+import { makeError, toUnityMcpError } from "../errors.js";
 import { UnityClient, type UnityClientOptions } from "./client.js";
 import { LogRing } from "./logs.js";
 
@@ -16,6 +17,16 @@ export interface PooledProject {
 
 export class ProjectPool {
   private readonly clients = new Map<string, { client: UnityClient; logs: LogRing }>();
+  /**
+   * The project each selector first resolved to in this server session. A
+   * selector keeps that meaning: while that editor is down, calls fail
+   * instead of re-resolving the same words to another running project whose
+   * path or name merely contains them ("Avatar" -> "Avatar2",
+   * "milfy_neo01" -> "milfy_neo01_jacket"). An editor that quits removes its
+   * registry entry, so discovery alone cannot tell "not running" from "never
+   * existed". No selector (the single running editor) is not remembered.
+   */
+  private readonly selectorMeaning = new Map<string, string>();
 
   constructor(
     private readonly cfg: Config,
@@ -32,7 +43,7 @@ export class ProjectPool {
    * lazily. Throws PROJECT_NOT_FOUND / PROJECT_AMBIGUOUS from discovery.
    */
   resolve(selector?: string): PooledProject {
-    const entry = resolveProject(this.cfg, selector);
+    const entry = this.resolveEntry(selector);
     const key = normalizeProjectPath(entry.projectPath);
     let pooled = this.clients.get(key);
     if (pooled && pooled.client.isDisposed) {
@@ -61,6 +72,36 @@ export class ProjectPool {
     }
     this.prune(key);
     return { key, entry, client: pooled.client, logs: pooled.logs };
+  }
+
+  private resolveEntry(selector?: string): RegistryEntry {
+    const sel = selector ?? this.cfg.projectSelector;
+    if (sel === undefined) return resolveProject(this.cfg, undefined);
+    const memoKey = normalizeProjectPath(sel);
+    const meant = this.selectorMeaning.get(memoKey);
+    if (meant === undefined) {
+      const entry = resolveProject(this.cfg, sel);
+      this.selectorMeaning.set(memoKey, entry.projectPath);
+      return entry;
+    }
+    try {
+      return resolveProject(this.cfg, meant);
+    } catch (err) {
+      const e = toUnityMcpError(err);
+      if (e.code !== "PROJECT_NOT_FOUND") throw err;
+      throw makeError(
+        "PROJECT_NOT_FOUND",
+        `"${sel}" means ${meant} in this session (it resolved there first), and that ` +
+          "editor is not running. Start it, or pass the full path of the project you want.",
+        {
+          detail: {
+            selector: sel,
+            project: meant,
+            ...(e.obj.detail !== null && typeof e.obj.detail === "object" ? e.obj.detail : {}),
+          },
+        },
+      );
+    }
   }
 
   /** Drop clients that are failed AND no longer present in the registry. */

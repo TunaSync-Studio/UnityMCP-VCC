@@ -76,7 +76,9 @@ describe("vrc_upload confirmation gate", () => {
   });
 
   it("passes confirm through when the caller opts in (and is armed)", async () => {
-    h = await setup();
+    // A plugin that claims the arm itself; older plugins are refused before
+    // submit (arm.test.ts covers both the arm gate and that refusal).
+    h = await setup({ features: ["vrcUploadArmClaim"] });
     fs.writeFileSync(h.armFile, "armed by test"); // human arm gate is covered in arm.test.ts
     await h.callTool("vrc_upload", {
       target: "avatar",

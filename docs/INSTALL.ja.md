@@ -145,5 +145,26 @@ methodはありません。リポジトリがあるなら代わりに
 New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 ```
 
-30 分で失効し、次の実アップロード試行で消費されます。**AI に作らせないで
-ください** — 人間がボタンに触れたこと自体が、このゲートの意味です。
+30 分で失効します。次の実アップロードの途中、VRChat SDK と必要な型の準備が
+できて、何かを変更・組み立てる直前に、Unity 側のプラグインが消費します。
+それより前の準備段階での失敗 (SDK のコントロールパネルにログインしていない、
+SDK が無い など) では消費されません。組み立てに進んだ後に失敗した場合は消費
+されるので、再試行の前に arm し直してください。それより前に拒否された呼び出し
+(`confirm` が無い、プラグインが古い、使える arm が無い — この場合は SDK の
+コントロールパネルを開く前に拒否されます) と `dry_run` でも消費されません。
+**AI に作らせないでください** — 人間がボタンに触れたこと自体が、このゲートの
+意味です。
+
+macOS/Linux では、arm の場所はサーバとプラグインのどちらも
+`~/.local/share/UnityMCP/arm/vrc-upload.arm` です (`$XDG_DATA_HOME` を設定して
+いる場合はその下)。`UNITY_MCP_ARM_FILE` (絶対パスのみ。相対パスは無視されます)
+と `UNITY_MCP_ARM_TTL_MIN` (分。最大 1440) で場所と期限を変える場合は、MCP
+サーバと Unity エディタの両方に設定してください。Creator Console もその同じ
+ファイルを arm・表示し、`tools/*-vrc-upload.bat` も `UNITY_MCP_ARM_FILE` に
+従います。macOS で Unity Hub から起動したエディタは、シェルだけで設定した
+変数を引き継がないので、両方のプロセスに届く場所で設定してください。
+
+「arm claim lock is held」で実アップロードが拒否され続ける場合 (エディタが
+異常終了した後など) は、Creator Console で許可を解除してから arm し直すか、
+`tools/arm-vrc-upload.bat` を実行してください。どちらも arm ファイルと同じ
+場所に残った `vrc-upload.arm.lock` を削除します。

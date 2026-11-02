@@ -50,12 +50,28 @@ run and the tests are silently skipped (exit code 0, no results XML).
 ## 4. SDK testbed (defines ON — VRC avatars + NDMF stack)
 
 - Compile: 0 errors with MCP_VRCSDK3_AVATARS / MCP_NDMF active.
-- `welcome.features` includes `ndmf`, `vrcAvatars`.
+- `welcome.features` includes `ndmf`, `vrcAvatars`, `vrcUploadArmClaim`.
 - `vrc_avatar_audit` on a real avatar returns all requested checks.
 - `ndmf_bake_run` on a real avatar: progress stream → output prefab exists;
   prefab still healthy after editor restart.
 - `vrc_upload {dry_run:true}`: structured {valid, issues[]} on a real
   descriptor. REAL upload is never part of the gate (publishes content).
+- Arm gate end to end, without publishing: in Creator Console, Disarm
+  until it shows DISARMED with no leftover-lock notice (the Console reads
+  the same arm file the plugin claims, including any `UNITY_MCP_ARM_FILE`
+  in the Unity Editor's environment). Start the MCP
+  server with `UNITY_MCP_ARM_FILE` pointing at a separate file (e.g.
+  `%TEMP%\unitymcp-smoke.arm`) and create that file; the Console must
+  still show DISARMED (if it shows ARMED, the editor uses the same file -
+  stop and delete it). Then `vrc_upload {target:"avatar", confirm:true}`
+  must be refused by the plugin with "arm file not found" before it opens
+  the SDK control panel (the server's pre-check passed; the file the plugin
+  checks does not exist), and
+  `%TEMP%\unitymcp-smoke.arm` must still exist (the server never consumes
+  the arm). The plugin never sees an arm here, so nothing can be
+  published. Delete the smoke file afterwards.
+- EditMode `UploadArmClaimTests` pass on Windows (the claim lock under
+  Windows file semantics, racing claimants included).
 
 ## 5. Migration / coexistence (scratch copy of a real project)
 
@@ -67,8 +83,11 @@ run and the tests are silently skipped (exit code 0, no results XML).
 
 - Kill the editor process → registry entry swept on next start; server
   reports UNITY_UNREACHABLE fast, reconnects when the editor returns.
-- Two editors on two projects: server routes by `project` argument;
-  ambiguous selector → PROJECT_AMBIGUOUS listing candidates.
+- Two editors on two projects: server routes by `project` argument
+  (full path, folder name or exact project name); a fragment of both
+  names → PROJECT_AMBIGUOUS listing candidates. Close one editor: a full
+  path selecting it must answer PROJECT_NOT_FOUND (or the blocked-editor
+  error), never route to the other project.
 - `UnityMCP.disabled` marker → no listener, no registry entry.
 
 ## Result classification

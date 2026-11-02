@@ -9,13 +9,18 @@ import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/m
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { Config } from "../config.js";
 import { UnityMcpError, hintFor, makeError, toUnityMcpError } from "../errors.js";
-import type { ErrorObj } from "../protocol.js";
+import type { ErrorObj, WelcomePayload } from "../protocol.js";
 import type { RecipeLibrary } from "../recipes.js";
 import type { UnityClient } from "../unity/client.js";
 import type { ProjectPool } from "../unity/pool.js";
 import { makeProgressBridge, type ProgressBridge, type ToolExtra } from "./progress.js";
 import { enrichBusyModal, probeBlockedEditor } from "../unity/blockedProbe.js";
-import { armRequiredResult, checkArm, consumeArm } from "../armGate.js";
+import {
+  ARM_CLAIM_FEATURE,
+  armClaimUnsupportedResult,
+  armRequiredResult,
+  checkArm,
+} from "../armGate.js";
 import { serverIdentity } from "../version.js";
 import {
   VRC_GET_INSTALL_HINT,
@@ -111,7 +116,12 @@ function sleep(ms: number): Promise<void> {
 const projectArg = z
   .string()
   .optional()
-  .describe("Project path or name substring; optional when only one Unity is running");
+  .describe(
+    "Project: a full path (that project only), a relative path of whole folder names, " +
+      "or a project/folder name (exact first, else a unique substring). A selector keeps " +
+      "meaning the project it first resolved to in this session. Optional when only one " +
+      "Unity is running",
+  );
 
 // F-21: health verdict threshold for a stalled editor main thread. Keep in
 // lockstep with the plugin's Dispatcher.BusyModalThresholdMs (3000).
@@ -314,6 +324,43 @@ async function waitForJob(
   }
 }
 
+/**
+ * Real-upload precondition on the plugin side: it must claim the arm itself
+ * (ARM_CLAIM_FEATURE), because the server only pre-checks it. sys.status
+ * first (cheap, answered on the transport thread): it connects lazily -
+ * getWelcome() is null before the first connection - and while the client is
+ * reconnecting (domain reload, package update) it is held until the new
+ * connection's welcome is in. Fail-safe: no welcome or no feature = refuse.
+ * Returns the refusal, or null when the plugin claims the arm.
+ */
+async function refuseWithoutArmClaim(
+  client: UnityClient,
+  signal: AbortSignal,
+): Promise<CallToolResult | null> {
+  // Submit-sized budget: this call stands in for the old first round trip, so
+  // a reload that job.submit would have waited out does not time out here.
+  await client.call("sys.status", {}, { timeoutMs: JOB_SUBMIT_TIMEOUT_MS, signal });
+  const welcome = client.getWelcome();
+  if (welcome !== null && pluginClaimsArm(welcome)) return null;
+  return armClaimUnsupportedResult(pluginVersionOf(welcome));
+}
+
+/** Welcome predicate: this plugin consumes the vrc_upload arm itself. */
+function pluginClaimsArm(welcome: WelcomePayload): boolean {
+  return Array.isArray(welcome.features) && welcome.features.includes(ARM_CLAIM_FEATURE);
+}
+
+function pluginVersionOf(welcome: WelcomePayload | null): string | null {
+  return typeof welcome?.plugin?.version === "string" ? welcome.plugin.version : null;
+}
+
+/** The client refused to send because CallOptions.requireWelcome was unmet. */
+function isUnmetWelcome(err: unknown): boolean {
+  if (!(err instanceof UnityMcpError) || err.code !== "VERSION_UNSUPPORTED") return false;
+  const detail = err.obj.detail as { precondition?: unknown } | undefined;
+  return detail?.precondition === "requireWelcome";
+}
+
 async function runJob(
   client: UnityClient,
   method: string,
@@ -321,11 +368,16 @@ async function runJob(
   timeoutMs: number,
   bridge: ProgressBridge,
   signal: AbortSignal,
+  submitRequireWelcome?: (welcome: WelcomePayload) => boolean,
 ): Promise<CallToolResult> {
   const submitted = await client.call(
     "job.submit",
     { method, params },
-    { timeoutMs: JOB_SUBMIT_TIMEOUT_MS, signal },
+    {
+      timeoutMs: JOB_SUBMIT_TIMEOUT_MS,
+      signal,
+      ...(submitRequireWelcome !== undefined ? { requireWelcome: submitRequireWelcome } : {}),
+    },
   );
   const jobId = extractJobId(submitted);
   if (jobId === null) {
@@ -896,8 +948,10 @@ const toolTable: readonly ToolRegistrar[] = [
       "requires BOTH confirm:true (ask the user for fresh approval of THIS " +
       "upload before setting it; a general request to work on the avatar is " +
       "not that approval) AND a human-created one-shot arm file " +
-      "(tools\\arm-vrc-upload.bat, TTL 30 min) " +
-      "- never create the arm file yourself. On wait timeout the job keeps " +
+      "(Creator Console or tools\\arm-vrc-upload.bat; 30 min by default; the Unity " +
+      "plugin consumes it when the upload starts) - never create the arm file " +
+      "yourself. On wait " +
+      "timeout the job keeps " +
       "running and the jobId is reported for job_status.",
     {
       target: z.enum(["avatar", "world"]),
@@ -940,21 +994,19 @@ const toolTable: readonly ToolRegistrar[] = [
         };
       }
       // Second, independent gate: confirm proves caller intent, the arm file
-      // proves *operator* intent (one-shot, human-created, TTL-bound).
+      // proves *operator* intent (one-shot, human-created, TTL-bound). The
+      // server only pre-checks it; the plugin claims (consumes) it exactly
+      // once, right before the upload starts (L-3/M-1). Consuming it here too made
+      // the 2.6.7+ plugin-side gate refuse every real upload.
       if (!args.dry_run) {
         const arm = checkArm(ctx.cfg);
         if (!arm.armed) return armRequiredResult(arm);
-        // L-3: consume is an atomic claim now - if a concurrent call won the
-        // race between our check and here, this attempt is NOT armed.
-        if (!consumeArm(arm.file)) {
-          return armRequiredResult({
-            armed: false,
-            file: arm.file,
-            detail: "arm was consumed by a concurrent attempt",
-          });
-        }
       }
       const { client } = ctx.pool.resolve(args.project);
+      if (!args.dry_run) {
+        const refused = await refuseWithoutArmClaim(client, extra.signal);
+        if (refused !== null) return refused;
+      }
       const bridge = makeProgressBridge(extra);
       try {
         return await runJob(
@@ -971,7 +1023,14 @@ const toolTable: readonly ToolRegistrar[] = [
           args.timeout_ms,
           bridge,
           extra.signal,
+          // Bind the feature check to the connection that carries the submit:
+          // if the plugin was swapped in between (reconnect to another build),
+          // the client refuses to send instead of trusting the earlier check.
+          args.dry_run ? undefined : pluginClaimsArm,
         );
+      } catch (err) {
+        if (isUnmetWelcome(err)) return armClaimUnsupportedResult(pluginVersionOf(client.getWelcome()));
+        throw err;
       } finally {
         bridge.done();
       }

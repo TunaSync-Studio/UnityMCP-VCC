@@ -581,49 +581,48 @@ namespace TunaSync.UnityMCP.Editor
                     "(or use dryRun:true to validate without publishing)");
             }
 
-            // M-1 (2026-08-12 audit): the human arm gate lived only in the npm
-            // server, so a client holding the registry token could drive the
-            // plugin directly and skip it. The plugin now READS the arm file
-            // (existence + TTL) as defense in depth; CONSUMING it stays
-            // server-side - a double delete would race the very server the
-            // file exists to satisfy.
-            ThrowIfNotArmed();
+            // Read-only pre-check: refuse a call without a usable arm before
+            // opening the SDK control panel or waiting for its builder. The
+            // arm is consumed only in RealUpload (single consumer, see there).
+            string armFile = McpUiModel.UploadArmPath;
+            UploadArmClaim.ArmStatus arm = UploadArmClaim.Inspect(armFile, McpUiModel.UploadArmTtlMinutes);
+            if (!arm.Usable) throw ArmRefusal(armFile, arm.Reason);
 
             return await RealUpload(ctx, target, content, objectName, blueprintId, thumbnailPath);
         }
 
         /// <summary>
-        /// Mirror of the server's armGate semantics (same file, same env
-        /// overrides, same TTL default) - read-only check, never consumes.
+        /// One arm = one real-upload attempt. Uses the arm file and TTL the
+        /// Creator Console shows (McpUiModel: UNITY_MCP_ARM_FILE /
+        /// UNITY_MCP_ARM_TTL_MIN from the Unity Editor's environment, read the
+        /// same way as the server's armGate), then claims it exclusively via
+        /// UploadArmClaim. Fail-safe: anything but a fresh arm claimed by this
+        /// call throws.
         /// </summary>
-        private static void ThrowIfNotArmed()
+        private static void ClaimArmOrThrow()
         {
-            string file = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_FILE");
-            if (string.IsNullOrEmpty(file)) file = McpUiModel.UploadArmPath;
-            double ttlMin = McpUiModel.UploadArmTtl.TotalMinutes;
-            string ttlEnv = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_TTL_MIN");
-            if (!string.IsNullOrEmpty(ttlEnv))
+            string file = McpUiModel.UploadArmPath;
+            string state = UploadArmClaim.TryClaim(file, McpUiModel.UploadArmTtlMinutes);
+            if (state != null) throw ArmRefusal(file, state);
+        }
+
+        private static McpHandlerException ArmRefusal(string file, string state)
+        {
+            string hint = "";
+            if (state == UploadArmClaim.NotFound)
             {
-                double parsed;
-                if (double.TryParse(ttlEnv, out parsed) && parsed > 0) ttlMin = parsed;
+                hint = " If the operator did arm it: another upload attempt may have used it " +
+                    "after the server checked it, an MCP server older than this plugin may " +
+                    "have consumed it before submitting the job (update the tunasync-unity-mcp " +
+                    "server to this plugin's version), or UNITY_MCP_ARM_FILE differs between " +
+                    "the server and the Unity Editor.";
             }
-            string state;
-            if (!File.Exists(file))
-            {
-                state = "arm file not found";
-            }
-            else
-            {
-                double ageMin = (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalMinutes;
-                if (ageMin <= ttlMin) return;
-                state = "arm file expired (age " + Math.Round(ageMin) + " min > TTL " +
-                    Math.Round(ttlMin) + " min)";
-            }
-            throw new McpHandlerException(ErrorCodes.InvalidParams,
+            return new McpHandlerException(ErrorCodes.InvalidParams,
                 "vrc.upload: a real upload additionally requires the human-created one-shot " +
-                "arm file (" + file + "; " + state + "). The operator arms it with " +
-                "tools/arm-vrc-upload.bat. If you are an AI agent: do NOT create this file " +
-                "yourself - stop and ask the operator to arm, then retry.");
+                "arm file (" + file + "; " + state + ")." + hint + " The operator arms it in " +
+                "Creator Console (VRC upload safety gate) or with tools/arm-vrc-upload.bat. If " +
+                "you are an AI agent: do NOT create this file yourself - stop and ask the " +
+                "operator to arm, then retry.");
         }
 
         public bool CanResume(JobRecord record) => false;
@@ -902,7 +901,47 @@ namespace TunaSync.UnityMCP.Editor
                         "vrc.upload: builder unavailable; is the SDK control panel logged in?");
                 }
 
-                // 3. Pin blueprintId on the PipelineManager when provided.
+                // 3. Content data struct (VRCAvatar / VRCWorld) and the
+                // BuildAndUpload overload - lookups only, nothing changed yet.
+                string dataTypeName = target == "avatar"
+                    ? "VRC.SDKBase.Editor.Api.VRCAvatar"
+                    : "VRC.SDKBase.Editor.Api.VRCWorld";
+                Type dataType = HandlerUtil.FindType(dataTypeName);
+                if (dataType == null)
+                {
+                    throw new McpHandlerException(ErrorCodes.HandlerException,
+                        "vrc.upload: content data type not found: " + dataTypeName);
+                }
+                MethodInfo bau = PickBuildAndUpload(iface, dataType);
+                if (bau == null)
+                {
+                    throw new McpHandlerException(ErrorCodes.HandlerException,
+                        "vrc.upload: BuildAndUpload method not found on " + iface.Name);
+                }
+                object data = Activator.CreateInstance(dataType);
+                string name = objectName ?? (content != null ? content.name : "Untitled");
+                HandlerUtil.TrySetProp(data, "Name", name);
+                if (!string.IsNullOrEmpty(blueprintId)) HandlerUtil.TrySetProp(data, "ID", blueprintId);
+                object[] args = BuildArgs(bau, content, data, dataType, thumbnailPath, ctx);
+
+                // 4. Human arm gate (M-1, 2026-08-12 audit): the plugin is the
+                // SINGLE consumer of the arm, so a client that skips the npm
+                // server still cannot publish through vrc.upload without it.
+                // Claimed here - after the SDK builder and every type it needs
+                // are found, before the first change (blueprintId pin) and the
+                // build - so a setup failure above (control panel not logged
+                // in, SDK types missing) leaves the arm in place, while every
+                // attempt that goes on to build uses it up (L-3: one arm = one
+                // attempt, also across editors). Run refused arm-less calls
+                // already (read-only); this claim is what counts. The server
+                // only pre-checks the arm and submits real uploads only to
+                // plugins that advertise "vrcUploadArmClaim". (2.6.7-2.6.8
+                // checked the arm in Run but left consuming it to the server,
+                // which did so before submitting the job - so every real upload
+                // was refused.)
+                ClaimArmOrThrow();
+
+                // 5. Pin blueprintId on the PipelineManager when provided.
                 if (!string.IsNullOrEmpty(blueprintId))
                 {
                     Component pipeline = target == "avatar" && content != null
@@ -916,37 +955,14 @@ namespace TunaSync.UnityMCP.Editor
                     }
                 }
 
-                // 4. Content data struct (VRCAvatar / VRCWorld).
-                string dataTypeName = target == "avatar"
-                    ? "VRC.SDKBase.Editor.Api.VRCAvatar"
-                    : "VRC.SDKBase.Editor.Api.VRCWorld";
-                Type dataType = HandlerUtil.FindType(dataTypeName);
-                if (dataType == null)
-                {
-                    throw new McpHandlerException(ErrorCodes.HandlerException,
-                        "vrc.upload: content data type not found: " + dataTypeName);
-                }
-                object data = Activator.CreateInstance(dataType);
-                string name = objectName ?? (content != null ? content.name : "Untitled");
-                HandlerUtil.TrySetProp(data, "Name", name);
-                if (!string.IsNullOrEmpty(blueprintId)) HandlerUtil.TrySetProp(data, "ID", blueprintId);
-
-                // 5. Phase markers via builder events (best effort). Once upload
+                // 6. Phase markers via builder events (best effort). Once upload
                 // starts we are past the point of no return.
                 TryHookEvent(builder, iface, "OnSdkBuildStart",
                     () => ctx.Report(20, "building bundle", "build"));
                 TryHookEvent(builder, iface, "OnSdkUploadStart",
                     () => ctx.Report(60, "uploading (point of no return)", "upload"));
 
-                // 6. BuildAndUpload(...) - match args by parameter type.
-                MethodInfo bau = PickBuildAndUpload(iface, dataType);
-                if (bau == null)
-                {
-                    throw new McpHandlerException(ErrorCodes.HandlerException,
-                        "vrc.upload: BuildAndUpload method not found on " + iface.Name);
-                }
-                object[] args = BuildArgs(bau, content, data, dataType, thumbnailPath, ctx);
-
+                // 7. BuildAndUpload(...) with the arguments matched above.
                 ctx.Report(10, "starting build+upload", "build");
                 object taskObj;
                 try
