@@ -83,8 +83,11 @@ run and the tests are silently skipped (exit code 0, no results XML).
 
 - Kill the editor process → registry entry swept on next start; server
   reports UNITY_UNREACHABLE fast, reconnects when the editor returns.
-- Two editors on two projects: server routes by `project` argument;
-  ambiguous selector → PROJECT_AMBIGUOUS listing candidates.
+- Two editors on two projects: server routes by `project` argument
+  (full path, folder name or exact project name); a fragment of both
+  names → PROJECT_AMBIGUOUS listing candidates. Close one editor: a full
+  path selecting it must answer PROJECT_NOT_FOUND (or the blocked-editor
+  error), never route to the other project.
 - `UnityMCP.disabled` marker → no listener, no registry entry.
 
 ## Result classification
