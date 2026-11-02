@@ -4,7 +4,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions tag the
 repo as `v2.x.y`; server-only releases explicitly note the unchanged Unity
 package version.
 
-## [2.6.9] - Unreleased
+## [2.6.9] - 2026-11-02
 
 Unity plugin + npm server release. Publish both together: a real
 `vrc_upload` needs the server and the Unity package from this release.
