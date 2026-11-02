@@ -30,12 +30,21 @@ describe("server/plugin feature contract", () => {
     expect(unconditional).toContain(`"${ARM_CLAIM_FEATURE}"`);
   });
 
-  it("the plugin's vrc.upload claims the arm before the real upload", () => {
+  it("the plugin's vrc.upload claims the arm once the builder is ready, before any change", () => {
     const src = fs.readFileSync(path.join(pluginEditor, "Handlers/VrcHandlers.cs"), "utf8");
-    const claim = src.indexOf("ClaimArmOrThrow();");
-    const upload = src.indexOf("return await RealUpload(");
-    expect(claim).toBeGreaterThan(-1);
-    expect(upload).toBeGreaterThan(claim);
+    // Exactly one call site, inside RealUpload.
+    const calls = src.split("ClaimArmOrThrow();").length - 1;
+    expect(calls).toBe(1);
+    const realUpload = src.indexOf("private async Task<object> RealUpload(");
+    const builder = src.indexOf("await PollForBuilder(", realUpload);
+    const claim = src.indexOf("ClaimArmOrThrow();", realUpload);
+    const pin = src.indexOf('"blueprintId", blueprintId', realUpload);
+    const invoke = src.indexOf("bau.Invoke(builder, args)", realUpload);
+    expect(realUpload).toBeGreaterThan(-1);
+    expect(builder).toBeGreaterThan(realUpload);
+    expect(claim).toBeGreaterThan(builder); // setup failures before it keep the arm
+    expect(pin).toBeGreaterThan(claim); // nothing is changed before the claim
+    expect(invoke).toBeGreaterThan(pin);
     expect(src).toContain("UploadArmClaim.TryClaim(");
   });
 });

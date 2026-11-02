@@ -3,6 +3,7 @@
 // Unity 2022.3 compatibility and a single battle-tested implementation matter
 // more here than a parallel UI Toolkit surface.
 using System;
+using System.Globalization;
 using UnityEditor;
 using UnityEngine;
 
@@ -295,25 +296,31 @@ namespace TunaSync.UnityMCP.Editor
         {
             Section(McpLoc.Tr("section.upload"));
             UploadArmSnapshot arm = McpUiModel.ReadUploadArm();
-            MessageType type = arm.Exists && !arm.Expired ? MessageType.Warning : MessageType.Info;
+            MessageType type = (arm.Exists && !arm.Expired) || arm.LockLeft ? MessageType.Warning : MessageType.Info;
             string state = !arm.Exists ? McpLoc.Tr("upload.disarmed")
                 : arm.Expired ? McpLoc.Tr("upload.expired")
                 : McpLoc.Tr("upload.armed") + "  ·  " +
                     Math.Max(1, (int)Math.Ceiling(arm.Remaining.TotalMinutes)) + " min";
-            EditorGUILayout.HelpBox(state + "\n" + McpLoc.Tr("upload.explain"), type);
+            string text = state + "\n" + McpLoc.Tr("upload.explain");
+            if (arm.LockLeft) text += "\n" + McpLoc.Tr("upload.lockLeft");
+            EditorGUILayout.HelpBox(text, type);
+            // The lifetime the vrc.upload claim enforces (UNITY_MCP_ARM_TTL_MIN, default 30).
+            string ttl = arm.TtlMinutes.ToString("0.##", CultureInfo.InvariantCulture);
+            string armLabel = string.Format(McpLoc.Tr("btn.armUpload"), ttl);
             using (new EditorGUILayout.HorizontalScope())
             {
                 using (new EditorGUI.DisabledScope(arm.Exists && !arm.Expired))
                 {
-                    if (GUILayout.Button(McpLoc.Tr("btn.armUpload"), GUILayout.Height(25f)) &&
+                    if (GUILayout.Button(armLabel, GUILayout.Height(25f)) &&
                         EditorUtility.DisplayDialog("VRC Upload Safety Gate",
-                            McpLoc.Tr("dialog.armUpload"), McpLoc.Tr("btn.armUpload"), McpLoc.Tr("btn.keep")))
+                            string.Format(McpLoc.Tr("dialog.armUpload"), ttl), armLabel, McpLoc.Tr("btn.keep")))
                     {
                         McpUiModel.ArmUploadHumanOnly();
-                        Toast(McpLoc.Tr("toast.uploadArmed"));
+                        Toast(string.Format(McpLoc.Tr("toast.uploadArmed"), ttl));
                     }
                 }
-                using (new EditorGUI.DisabledScope(!arm.Exists))
+                // Also enabled for a lone leftover claim lock, so it can be cleared.
+                using (new EditorGUI.DisabledScope(!arm.Exists && !arm.LockLeft))
                 {
                     if (GUILayout.Button(McpLoc.Tr("btn.disarmUpload"), GUILayout.Height(25f)))
                     {

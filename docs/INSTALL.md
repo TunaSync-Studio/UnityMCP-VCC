@@ -143,11 +143,20 @@ Create the marker file yourself:
 New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 ```
 
-It expires after 30 minutes. The Unity plugin consumes it when the next
-real upload starts — also if that upload then fails, so arm again before a
-retry. Calls refused before that point (missing `confirm`, outdated
-plugin) and `dry_run` leave it in place. Never let the AI create
+It expires after 30 minutes. The Unity plugin consumes it during the next
+real upload, once the VRChat SDK builder is ready and before anything is
+built: a setup failure before that point (SDK control panel not logged in,
+SDK missing) leaves it in place, while an attempt that goes on to build
+uses it up even if the build or upload then fails — arm again before
+retrying in that case. Calls refused earlier (missing `confirm`, outdated
+plugin) and `dry_run` leave it in place too. Never let the AI create
 it — the whole point is that a human touched the button.
+
+On macOS/Linux the arm lives at `~/.local/share/UnityMCP/arm/vrc-upload.arm`
+(`$XDG_DATA_HOME/UnityMCP/arm/...` when that is set) for both the server
+and the plugin. `UNITY_MCP_ARM_FILE` / `UNITY_MCP_ARM_TTL_MIN` override the
+location and lifetime; set them for both the MCP server and the Unity
+Editor (Creator Console then arms and shows that same file).
 
 If real uploads keep being refused with "arm claim lock is held" (for
 example after an editor crash), disarm and arm again in Creator Console, or

@@ -58,6 +58,20 @@ namespace TunaSync.UnityMCP.Editor
         }
 
         /// <summary>
+        /// UNITY_MCP_ARM_FILE read the way the server reads it: trimmed, and
+        /// only when non-empty; otherwise the default arm location.
+        /// </summary>
+        internal static string ResolveArmFile(string envValue, string fallbackPath)
+        {
+            if (envValue != null)
+            {
+                string trimmed = envValue.Trim();
+                if (trimmed.Length > 0) return trimmed;
+            }
+            return fallbackPath;
+        }
+
+        /// <summary>
         /// UNITY_MCP_ARM_TTL_MIN read the way the server reads it: a positive,
         /// finite number of minutes, parsed culture-invariantly ("1.5" means
         /// 1.5 minutes in every locale). Anything else gives the fallback.

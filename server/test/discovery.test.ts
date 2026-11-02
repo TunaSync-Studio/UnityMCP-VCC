@@ -190,6 +190,60 @@ describe("discovery", () => {
     expect(code).toBe("PROJECT_NOT_FOUND");
   });
 
+  function codeOf(fn: () => unknown): string {
+    try {
+      fn();
+    } catch (e) {
+      return (e as UnityMcpError).code;
+    }
+    return "no error";
+  }
+
+  it("a full-path selector never falls back to a project whose path merely contains it", () => {
+    // The pool pins clients by full path and re-resolves on reconnect: while
+    // ".../Avatar" is restarting, it must not drift to ".../Avatar2".
+    writeEntry(tmp, "a.json", { projectPath: "C:/Projects/Avatar", projectName: "Avatar", pid: deadPid });
+    writeEntry(tmp, "b.json", { projectPath: "C:/Projects/Avatar2", projectName: "Avatar2" });
+    expect(codeOf(() => resolveProject(cfg, "C:/Projects/Avatar"))).toBe("PROJECT_NOT_FOUND");
+    fs.rmSync(path.join(tmp, "a.json")); // not even registered
+    expect(codeOf(() => resolveProject(cfg, "C:\\Projects\\Avatar"))).toBe("PROJECT_NOT_FOUND");
+    expect(resolveProject(cfg, "C:/Projects/Avatar2").projectName).toBe("Avatar2");
+  });
+
+  it("a blocked exact project reports unresponsive instead of matching a sibling", () => {
+    const stale = writeEntry(tmp, "a.json", { projectPath: "C:/Projects/Avatar", projectName: "Avatar" });
+    const past = new Date(Date.now() - 200_000);
+    fs.utimesSync(stale, past, past);
+    writeEntry(tmp, "b.json", { projectPath: "C:/Projects/Avatar2", projectName: "Avatar2" });
+    const code = codeOf(() => resolveProject(cfg, "C:/Projects/Avatar"));
+    expect(code).not.toBe("no error");
+    expect(code).not.toBe("PROJECT_NOT_FOUND");
+    expect(codeOf(() => resolveProject(cfg, "Avatar"))).toBe(code);
+  });
+
+  it("a trailing path matches at a folder boundary only", () => {
+    writeEntry(tmp, "a.json", { projectPath: "D:/Work/Projects/Avatar", projectName: "Avatar" });
+    writeEntry(tmp, "b.json", { projectPath: "D:/Work/Projects/Avatar2", projectName: "Avatar2" });
+    expect(resolveProject(cfg, "Projects/Avatar").projectName).toBe("Avatar");
+    expect(resolveProject(cfg, "projects\\avatar2").projectName).toBe("Avatar2");
+    expect(codeOf(() => resolveProject(cfg, "Projects/Ava"))).toBe("PROJECT_NOT_FOUND");
+  });
+
+  it("a bare name prefers the exact project over substring matches", () => {
+    writeEntry(tmp, "a.json", { projectPath: "C:/VRChat/Avatar", projectName: "Avatar" });
+    writeEntry(tmp, "b.json", { projectPath: "C:/VRChat/Avatar2", projectName: "Avatar2" });
+    expect(resolveProject(cfg, "avatar").projectName).toBe("Avatar"); // was PROJECT_AMBIGUOUS
+    expect(resolveProject(cfg, "Avatar2").projectName).toBe("Avatar2");
+  });
+
+  it("a bare name whose exact project is down does not fall back to a sibling", () => {
+    writeEntry(tmp, "a.json", { projectPath: "C:/VRChat/Avatar", projectName: "Avatar", pid: deadPid });
+    writeEntry(tmp, "b.json", { projectPath: "C:/VRChat/Avatar2", projectName: "Avatar2" });
+    expect(codeOf(() => resolveProject(cfg, "Avatar"))).toBe("PROJECT_NOT_FOUND");
+    // A fragment that names no project exactly still substring-matches.
+    expect(resolveProject(cfg, "atar2").projectName).toBe("Avatar2");
+  });
+
   it("returns an empty scan for a missing registry directory", () => {
     const missing: Config = {
       projectSelector: undefined,

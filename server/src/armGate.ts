@@ -23,10 +23,9 @@
 // UNITY_MCP_ARM_TTL_MIN  override the TTL in minutes (default 30)
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { Config } from "./config.js";
+import { localDataDir, type Config } from "./config.js";
 import { SERVER_VERSION, serverIdentity } from "./version.js";
 
 export const DEFAULT_ARM_TTL_MS = 30 * 60 * 1000;
@@ -39,13 +38,14 @@ export interface ArmCheck {
   detail: string;
 }
 
-export function armFilePath(cfg: Pick<Config, "armFile">): string {
+export function armFilePath(
+  cfg: Pick<Config, "armFile">,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
   if (cfg.armFile !== undefined && cfg.armFile.length > 0) return cfg.armFile;
-  const localAppData =
-    process.env.LOCALAPPDATA && process.env.LOCALAPPDATA.length > 0
-      ? process.env.LOCALAPPDATA
-      : path.join(os.homedir(), "AppData", "Local");
-  return path.join(localAppData, "UnityMCP", "arm", "vrc-upload.arm");
+  // Same folder the plugin uses (LocalApplicationData) - see localDataDir().
+  return path.join(localDataDir(env, platform), "UnityMCP", "arm", "vrc-upload.arm");
 }
 
 export function checkArm(

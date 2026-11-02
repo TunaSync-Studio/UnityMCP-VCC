@@ -84,14 +84,14 @@ long NDMF/upload waits, set `tool_timeout_sec = 1300` in the server's
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `UNITY_MCP_PROJECT` | (auto) | Project path or name substring used when several Unity editors run at once |
+| `UNITY_MCP_PROJECT` | (auto) | Default project when several Unity editors run at once. A path (anything with `/` or `\`) selects only that project - the full path, or a trailing part that ends at a folder boundary - and never falls back to a partial match; a bare name selects the project whose name or folder is exactly that name, else a unique substring of a project path or name |
 | `UNITY_MCP_RECIPES_DIR` | bundled `recipes/` | Override the recipe library location |
-| `UNITY_MCP_REGISTRY_DIR` | `%LOCALAPPDATA%\UnityMCP\registry` | Override the plugin discovery registry |
+| `UNITY_MCP_REGISTRY_DIR` | `%LOCALAPPDATA%\UnityMCP\registry` (macOS/Linux: `~/.local/share/UnityMCP/registry`, or under `$XDG_DATA_HOME`) | Override the plugin discovery registry. The default matches the plugin's on every platform; an override must be set for both the server and the Unity Editor |
 | `UNITY_MCP_DEFAULT_TIMEOUT_MS` | `60000` | Default per-call timeout |
 | `UNITY_MCP_STREAM_MODE` | off | `1` = streaming mode: lock destructive/publishing tools, mask user paths in output |
 | `UNITY_MCP_STREAM_MASK` | (none) | Extra literal terms to mask, `;`-separated |
-| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` | Human arm file required (with `confirm:true`) for a real `vrc_upload`. The server only pre-checks it; the Unity plugin consumes it and reads this variable from the **Unity Editor's** environment, so an override must be set for both processes (the Creator Console arm button always uses the default path) |
-| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed by the plugin per attempt; same both-processes rule) |
+| `UNITY_MCP_ARM_FILE` | `%LOCALAPPDATA%\UnityMCP\arm\vrc-upload.arm` (macOS/Linux: `~/.local/share/UnityMCP/arm/vrc-upload.arm`, or under `$XDG_DATA_HOME`) | Human arm file required (with `confirm:true`) for a real `vrc_upload`. The server only pre-checks it; the Unity plugin consumes it and, like its Creator Console, reads this variable from the **Unity Editor's** environment - so an override must be set for both processes |
+| `UNITY_MCP_ARM_TTL_MIN` | `30` | Arm file freshness window in minutes (one-shot; consumed by the plugin per attempt; same both-processes rule; Creator Console shows the effective value) |
 
 ## Tools
 

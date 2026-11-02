@@ -145,10 +145,18 @@ methodはありません。リポジトリがあるなら代わりに
 New-Item -Force -ItemType File "$env:LOCALAPPDATA\UnityMCP\arm\vrc-upload.arm"
 ```
 
-30 分で失効します。次の実アップロードが始まる時に Unity 側のプラグインが
-消費します (そのアップロードが途中で失敗した場合も消費されるので、再試行の
-前に arm し直してください)。それより前に拒否された呼び出し (`confirm` が
-無い、プラグインが古い) と `dry_run` では消費されません。
+30 分で失効します。次の実アップロードの途中、VRChat SDK の準備ができて
+アップロードを組み立てる直前に、Unity 側のプラグインが消費します。それより
+前の準備段階での失敗 (SDK のコントロールパネルにログインしていない、SDK が
+無い など) では消費されません。組み立てに進んだ後に失敗した場合は消費される
+ので、再試行の前に arm し直してください。それより前に拒否された呼び出し
+(`confirm` が無い、プラグインが古い) と `dry_run` でも消費されません。
+
+macOS/Linux では、arm の場所はサーバとプラグインのどちらも
+`~/.local/share/UnityMCP/arm/vrc-upload.arm` です (`$XDG_DATA_HOME` を設定して
+いる場合はその下)。`UNITY_MCP_ARM_FILE` / `UNITY_MCP_ARM_TTL_MIN` で場所と
+期限を変える場合は、MCP サーバと Unity エディタの両方に設定してください
+(Creator Console もその同じファイルを arm・表示します)。
 **AI に作らせないでください** — 人間がボタンに触れたこと自体が、このゲートの
 意味です。
 

@@ -8,7 +8,7 @@ import { loadStreamMode, type StreamModeState } from "./streamMode.js";
 export interface Config {
   /** UNITY_MCP_PROJECT: project path substring used as the default selector. */
   projectSelector: string | undefined;
-  /** UNITY_MCP_REGISTRY_DIR override; default %LOCALAPPDATA%\UnityMCP\registry. */
+  /** UNITY_MCP_REGISTRY_DIR override; default <localDataDir()>/UnityMCP/registry. */
   registryDir: string;
   /** UNITY_MCP_DEFAULT_TIMEOUT_MS; default 60000. */
   defaultTimeoutMs: number;
@@ -29,11 +29,32 @@ export interface Config {
   armTtlMs?: number;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const localAppData =
-    env.LOCALAPPDATA && env.LOCALAPPDATA.length > 0
-      ? env.LOCALAPPDATA
-      : path.join(os.homedir(), "AppData", "Local");
+/**
+ * Base folder of the registry and the vrc_upload arm file when they are not
+ * overridden. It mirrors the plugin's Environment.SpecialFolder
+ * .LocalApplicationData so both sides agree without configuration:
+ * %LOCALAPPDATA% on Windows; on macOS and Linux Unity's Mono answers
+ * $XDG_DATA_HOME, else ~/.local/share (no macOS special case - checked against
+ * Environment.UnixGetFolderPath in Unity's unity-2022.3-mbe Mono). Through
+ * 2.6.8 the server used ~/AppData/Local there, so the two sides never met
+ * unless UNITY_MCP_REGISTRY_DIR was set for both. An explicit LOCALAPPDATA is
+ * still honored first on every platform.
+ */
+export function localDataDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (env.LOCALAPPDATA && env.LOCALAPPDATA.length > 0) return env.LOCALAPPDATA;
+  if (platform === "win32") return path.join(os.homedir(), "AppData", "Local");
+  if (env.XDG_DATA_HOME && env.XDG_DATA_HOME.length > 0) return env.XDG_DATA_HOME;
+  return path.join(os.homedir(), ".local", "share");
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Config {
+  const localAppData = localDataDir(env, platform);
 
   const registryDir =
     env.UNITY_MCP_REGISTRY_DIR && env.UNITY_MCP_REGISTRY_DIR.length > 0

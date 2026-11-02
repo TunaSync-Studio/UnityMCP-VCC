@@ -581,35 +581,23 @@ namespace TunaSync.UnityMCP.Editor
                     "(or use dryRun:true to validate without publishing)");
             }
 
-            // M-1 (2026-08-12 audit): the human arm gate lived only in the npm
-            // server, so a client holding the registry token could drive the
-            // plugin directly and skip it. The plugin is now the SINGLE
-            // consumer of the arm: it claims it exclusively right here, before
-            // the real upload starts (L-3: one arm = one attempt, also across
-            // editors). The server only pre-checks (read-only) and refuses to
-            // submit to plugins that do not advertise the "vrcUploadArmClaim"
-            // feature. (2.6.7-2.6.8 checked here but left consuming to the
-            // server, which consumed before submitting the job - so every real
-            // upload was refused with "arm file not found".)
-            ClaimArmOrThrow();
-
+            // The human arm is claimed inside RealUpload, once the SDK builder
+            // is ready and before anything is changed or built (see there).
             return await RealUpload(ctx, target, content, objectName, blueprintId, thumbnailPath);
         }
 
         /// <summary>
-        /// One arm = one real-upload attempt. Resolves the arm file and TTL the
-        /// same way as the server's armGate (UNITY_MCP_ARM_FILE /
-        /// UNITY_MCP_ARM_TTL_MIN, read from the Unity Editor's environment),
-        /// then claims it exclusively via UploadArmClaim. Fail-safe: anything
-        /// but a fresh arm claimed by this call throws.
+        /// One arm = one real-upload attempt. Uses the arm file and TTL the
+        /// Creator Console shows (McpUiModel: UNITY_MCP_ARM_FILE /
+        /// UNITY_MCP_ARM_TTL_MIN from the Unity Editor's environment, read the
+        /// same way as the server's armGate), then claims it exclusively via
+        /// UploadArmClaim. Fail-safe: anything but a fresh arm claimed by this
+        /// call throws.
         /// </summary>
         private static void ClaimArmOrThrow()
         {
-            string file = Environment.GetEnvironmentVariable("UNITY_MCP_ARM_FILE");
-            if (string.IsNullOrEmpty(file)) file = McpUiModel.UploadArmPath;
-            double ttlMin = UploadArmClaim.ResolveTtlMinutes(
-                Environment.GetEnvironmentVariable("UNITY_MCP_ARM_TTL_MIN"),
-                McpUiModel.UploadArmTtl.TotalMinutes);
+            string file = McpUiModel.UploadArmPath;
+            double ttlMin = McpUiModel.UploadArmTtlMinutes;
             string state = UploadArmClaim.TryClaim(file, ttlMin);
             if (state == null) return;
             string hint = "";
@@ -623,9 +611,10 @@ namespace TunaSync.UnityMCP.Editor
             }
             throw new McpHandlerException(ErrorCodes.InvalidParams,
                 "vrc.upload: a real upload additionally requires the human-created one-shot " +
-                "arm file (" + file + "; " + state + ")." + hint + " The operator arms it with " +
-                "tools/arm-vrc-upload.bat. If you are an AI agent: do NOT create this file " +
-                "yourself - stop and ask the operator to arm, then retry.");
+                "arm file (" + file + "; " + state + ")." + hint + " The operator arms it in " +
+                "Creator Console (VRC upload safety gate) or with tools/arm-vrc-upload.bat. If " +
+                "you are an AI agent: do NOT create this file yourself - stop and ask the " +
+                "operator to arm, then retry.");
         }
 
         public bool CanResume(JobRecord record) => false;
@@ -903,6 +892,21 @@ namespace TunaSync.UnityMCP.Editor
                     throw new McpHandlerException(ErrorCodes.HandlerException,
                         "vrc.upload: builder unavailable; is the SDK control panel logged in?");
                 }
+
+                // Human arm gate (M-1, 2026-08-12 audit): the plugin is the
+                // SINGLE consumer of the arm, so a client that skips the npm
+                // server still cannot publish through vrc.upload without it.
+                // Claimed here - after the SDK builder is ready, before the
+                // first change (blueprintId pin) and the build - so a setup
+                // failure above (control panel not logged in, SDK types
+                // missing) leaves the arm in place, while every attempt that
+                // goes on to build uses it up (L-3: one arm = one attempt, also
+                // across editors). The server only pre-checks the arm and
+                // submits real uploads only to plugins that advertise
+                // "vrcUploadArmClaim". (2.6.7-2.6.8 checked the arm in Run but
+                // left consuming it to the server, which did so before
+                // submitting the job - so every real upload was refused.)
+                ClaimArmOrThrow();
 
                 // 3. Pin blueprintId on the PipelineManager when provided.
                 if (!string.IsNullOrEmpty(blueprintId))

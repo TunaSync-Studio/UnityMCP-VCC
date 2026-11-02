@@ -104,6 +104,16 @@ namespace TunaSync.UnityMCP.Editor.Tests
             }
         }
 
+        [Test]
+        public void ArmFileOverrideIsReadLikeTheServer()
+        {
+            // UNITY_MCP_ARM_FILE: trimmed, used only when non-empty.
+            Assert.AreEqual("/x/vrc-upload.arm", UploadArmClaim.ResolveArmFile(" /x/vrc-upload.arm ", "/d.arm"));
+            Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile("", "/d.arm"));
+            Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile("   ", "/d.arm"));
+            Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile(null, "/d.arm"));
+        }
+
         [TestCase("")]
         [TestCase("0")]
         [TestCase("-5")]

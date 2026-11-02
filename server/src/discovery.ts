@@ -142,10 +142,30 @@ function throwUnresponsive(hits: DiscoveredProject[], now: number): never {
   );
 }
 
+/** A selector with a path separator names a location, not a name fragment. */
+function isPathSelector(normSel: string): boolean {
+  return normSel.includes("/");
+}
+
+/**
+ * The selector names this project exactly: its normalized path, a trailing
+ * part of it that ends at a folder boundary ("Projects/Avatar" names
+ * ".../Projects/Avatar" but never ".../Avatar2"; a bare "Avatar" names the
+ * folder), or - for a bare name - its project name.
+ */
+function namesExactly(e: RegistryEntry, normSel: string, sel: string): boolean {
+  const p = normalizeProjectPath(e.projectPath);
+  if (p === normSel || p.endsWith("/" + normSel)) return true;
+  return !isPathSelector(normSel) && e.projectName.toLowerCase() === sel.toLowerCase();
+}
+
 /**
  * Resolve a selector to exactly one live registry entry.
- * Order: exact normalized path match -> substring match (path or name) ->
- * single-alive default. Throws PROJECT_AMBIGUOUS / PROJECT_NOT_FOUND.
+ * Order: exact (path, folder-boundary path suffix, or project name) ->
+ * the exactly named project exists but is down: report that, never a
+ * different project -> path selectors stop there -> name fragments fall back
+ * to substring match (path or name) -> single-alive default.
+ * Throws PROJECT_AMBIGUOUS / PROJECT_NOT_FOUND (or the F-12 blocked error).
  */
 export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
   const sel = selector ?? cfg.projectSelector;
@@ -156,8 +176,42 @@ export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
 
   if (sel !== undefined) {
     const normSel = normalizeProjectPath(sel);
-    const exact = alive.find((e) => normalizeProjectPath(e.projectPath) === normSel);
-    if (exact) return exact;
+    const exactAlive = alive.filter((e) => namesExactly(e, normSel, sel));
+    if (exactAlive.length === 1 && exactAlive[0]) return exactAlive[0];
+    if (exactAlive.length > 1) {
+      throw makeError(
+        "PROJECT_AMBIGUOUS",
+        `selector "${sel}" matches ${exactAlive.length} projects`,
+        { detail: { candidates: exactAlive.map((e) => candidateOf(e)) } },
+      );
+    }
+
+    // The exactly named project is registered but not reachable right now
+    // (blocked, restarting, exited). Say so - never substitute another
+    // project whose path or name merely contains the selector: a pooled
+    // client is pinned by full path and re-resolves on every reconnect, so a
+    // fuzzy fallback here silently moved it to e.g. ".../Avatar2".
+    const exactDown = scanned.filter((d) => !d.alive && namesExactly(d.entry, normSel, sel));
+    if (exactDown.length > 0) {
+      const blocked = exactDown.filter((d) => d.reason === "unresponsive");
+      if (blocked.length > 0) throwUnresponsive(blocked, now);
+      throw makeError("PROJECT_NOT_FOUND", `the Unity project "${sel}" is not running`, {
+        detail: {
+          candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),
+          registryDir: cfg.registryDir,
+        },
+      });
+    }
+
+    // A path names one location: no fuzzy fallback.
+    if (isPathSelector(normSel)) {
+      throw makeError("PROJECT_NOT_FOUND", `no running Unity project at "${sel}"`, {
+        detail: {
+          candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),
+          registryDir: cfg.registryDir,
+        },
+      });
+    }
 
     const needle = sel.toLowerCase();
     const sub = alive.filter(

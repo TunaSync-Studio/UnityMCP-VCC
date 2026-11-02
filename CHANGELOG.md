@@ -4,7 +4,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions tag the
 repo as `v2.x.y`; server-only releases explicitly note the unchanged Unity
 package version.
 
-## [Unreleased]
+## [2.6.9] - Unreleased
+
+Unity plugin + npm server release. Publish both together: a real
+`vrc_upload` needs the server and the Unity package from this release.
 
 ### Fixed
 - **Every MCP-driven real `vrc_upload` was refused (2.6.7–2.6.8)**: the
@@ -12,17 +15,19 @@ package version.
   the plugin-side arm check added in 2.6.7 (M-1) then found no file, so
   the job always failed with "arm file not found" (fail-safe — nothing
   was published, but the arm was used up). The Unity plugin is now the
-  single consumer: right before the upload starts it checks the TTL and
-  deletes the arm while holding an exclusive claim lock
-  (`vrc-upload.arm.lock`, created with `FileMode.CreateNew`). One arm
-  still buys exactly one attempt, also when attempts race - including
-  two editors sharing one arm (L-3) - and a client that bypasses the
-  server still cannot skip it on `vrc.upload` (M-1). The claim deliberately does not
-  rely on `File.Move`: Mono on macOS/Linux implements it as link +
-  unlink, so two concurrent moves of one file can both succeed. The
-  server only pre-checks the arm (early `ARM_REQUIRED` without
-  submitting anything) and never consumes it. The Creator Console arm
-  dialog now says the plugin consumes the arm.
+  single consumer: once the VRChat SDK builder is ready, before anything
+  is changed or built, it checks the TTL and deletes the arm while
+  holding an exclusive claim lock (`vrc-upload.arm.lock`, created with
+  `FileMode.CreateNew`). A setup failure before that point (SDK control
+  panel not logged in, SDK types missing) leaves the arm in place; an
+  attempt that goes on to build uses it up. One arm still buys exactly
+  one attempt, also when attempts race - including two editors sharing
+  one arm (L-3) - and a client that bypasses the server still cannot
+  skip it on `vrc.upload` (M-1). The claim deliberately does not rely on
+  `File.Move`: Mono on macOS/Linux implements it as link + unlink, so two
+  concurrent moves of one file can both succeed. The server only
+  pre-checks the arm (early `ARM_REQUIRED` without submitting anything)
+  and never consumes it.
 - Arm TTL: the plugin reads `UNITY_MCP_ARM_TTL_MIN` the way the server
   does (culture-invariant, positive and finite - `1.5` no longer becomes
   15 minutes in locales with a decimal comma, and `Infinity` is
@@ -32,20 +37,44 @@ package version.
 - The feature check is bound to the connection that carries the real
   upload: `job.submit` is sent with `requireWelcome` (new `CallOptions`
   field), so if the editor reconnects to a plugin build without
-  `vrcUploadArmClaim` between the check and the submit, the client refuses
-  to send (`PLUGIN_UPDATE_REQUIRED`, arm untouched) instead of trusting
-  the earlier check. The pre-check waits as long as `job.submit` used to
-  (15 s), so a reload in progress is waited out as before.
+  `vrcUploadArmClaim` between the check and the submit, the client
+  refuses to send (`PLUGIN_UPDATE_REQUIRED`, arm untouched) instead of
+  trusting the earlier check. The pre-check waits as long as `job.submit`
+  used to (15 s), so a reload in progress is waited out as before.
 - A claim lock left behind by a crashed editor no longer needs manual
-  cleanup: arming or disarming (Creator Console, `tools/*.bat`) removes it.
+  cleanup: arming or disarming (Creator Console, `tools/*.bat`) removes
+  it, and Creator Console reports it.
+- **Creator Console and the upload claim now use the same arm file and
+  lifetime**: both honor `UNITY_MCP_ARM_FILE` / `UNITY_MCP_ARM_TTL_MIN`
+  from the Unity Editor's environment. Before, the Console armed and
+  showed the default path with a fixed 30 minutes while the claim honored
+  the overrides. The Console labels show the effective lifetime.
+- **A project selector could switch projects**: a pooled client is
+  pinned by full path and re-resolves on every reconnect, and while that
+  editor was restarting the substring fallback could connect it to
+  another project whose path contains it (`.../Avatar` -> `.../Avatar2`).
+  A selector with a path separator now names exactly one location (the
+  full path, or a trailing path that ends at a folder boundary) and never
+  falls back to substring matching; a bare name prefers the project whose
+  name or folder is exactly that name; and when the exactly named project
+  is registered but down, the call says so instead of picking another.
+- **macOS/Linux defaults**: the server's default registry and arm folder
+  now match the plugin's `LocalApplicationData` (`$XDG_DATA_HOME`, else
+  `~/.local/share` - what Unity's Mono answers on macOS and Linux).
+  Through 2.6.8 the server looked under `~/AppData/Local` there, so the
+  two sides never met unless `UNITY_MCP_REGISTRY_DIR` (and
+  `UNITY_MCP_ARM_FILE`) were set for both. An explicit `LOCALAPPDATA` is
+  still honored first.
 - Tests: the server arm tests now emulate the plugin-side gate of each
   plugin generation (claim / read-only check / none); the old test only
   asserted that the server deleted the file, which is how the conflict
   with the plugin-side check went unnoticed. New Unity EditMode tests
   (`UploadArmClaimTests`) cover the claim itself, including racing
   claimants; `featureContract.test.ts` pins the `vrcUploadArmClaim`
-  string across server and plugin in CI; `requireWelcome.test.ts` covers
-  the send-time check, including a reload into a downgraded build.
+  string and the claim's position across server and plugin in CI;
+  `requireWelcome.test.ts` covers the send-time check, including a
+  reload into a downgraded build; `discovery.test.ts` and
+  `dataDir.test.ts` cover the selector and default-folder changes.
 
 ### Changed
 - **Real uploads need the server and the Unity package from the same
@@ -55,6 +84,9 @@ package version.
   submitted, the arm left in place; `dry_run` is unaffected). An older
   server with the new plugin also fails safe: the plugin refuses with
   "arm file not found" and a hint to update the server.
+- A bare project name that exactly matches one project's name or folder
+  now selects it even when other projects contain that name (it used to
+  be `PROJECT_AMBIGUOUS`).
 
 ## [2.6.8] - 2026-08-12
 
