@@ -244,6 +244,29 @@ describe("discovery", () => {
     expect(resolveProject(cfg, "atar2").projectName).toBe("Avatar2");
   });
 
+  it("an absolute path matches only that location; a relative path matches whole folders", () => {
+    writeEntry(tmp, "a.json", { projectPath: "D:/Work/VRChat/Manuka/Manuka_Project", projectName: "Manuka" });
+    writeEntry(tmp, "b.json", { projectPath: "D:/Work/VRChat/Avatar2", projectName: "Avatar2" });
+    expect(resolveProject(cfg, "VRChat/Manuka").projectName).toBe("Manuka"); // mid-path fragment
+    expect(resolveProject(cfg, "Work/VRChat/Manuka/Manuka_Project").projectName).toBe("Manuka");
+    expect(codeOf(() => resolveProject(cfg, "D:/Work/VRChat/Manuka"))).toBe("PROJECT_NOT_FOUND"); // absolute: exact only
+    expect(codeOf(() => resolveProject(cfg, "VRChat/Ava"))).toBe("PROJECT_NOT_FOUND"); // never part of a folder name
+    // A trailing separator still makes it a path: "VRChat/" is a folder, not a name fragment.
+    expect(codeOf(() => resolveProject(cfg, "VRChat/"))).toBe("PROJECT_AMBIGUOUS");
+  });
+
+  it("a schema-mismatched exact project is reported as such, not substituted", () => {
+    writeEntry(tmp, "a.json", { projectPath: "C:/P/Avatar", projectName: "Avatar", schemaVersion: 2 });
+    writeEntry(tmp, "b.json", { projectPath: "C:/P/Avatar2", projectName: "Avatar2" });
+    let message = "";
+    try {
+      resolveProject(cfg, "Avatar");
+    } catch (e) {
+      message = (e as UnityMcpError).message;
+    }
+    expect(message).toContain("incompatible plugin version");
+  });
+
   it("returns an empty scan for a missing registry directory", () => {
     const missing: Config = {
       projectSelector: undefined,

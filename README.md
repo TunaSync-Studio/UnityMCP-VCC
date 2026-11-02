@@ -137,7 +137,8 @@ rest; recipes are also exposed as MCP resources
   present a token that only your OS user can read.
 - **Platform**: developed and verified on **Windows**. The pieces that were
   Windows-hardcoded now handle POSIX (extensionless `dotnet` probe for eval,
-  `UNITY_MCP_REGISTRY_DIR` on both sides, chmod-tightened token files), but
+  matching registry/arm folders on both sides by default - `$XDG_DATA_HOME`
+  or `~/.local/share` - chmod-tightened token files), but
   macOS/Linux have not been exercised on real machines yet — treat them as
   best-effort.
 - **Unity**: verified on **2022.3.22f1** (VRChat's version). Other 2022.3

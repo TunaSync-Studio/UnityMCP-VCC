@@ -1,5 +1,6 @@
-// Registry discovery: scan %LOCALAPPDATA%\UnityMCP\registry\*.json for live
-// plugin listeners and resolve a project selector to exactly one entry.
+// Registry discovery: scan the registry folder (config.registryDir, e.g.
+// %LOCALAPPDATA%\UnityMCP\registry\*.json) for live plugin listeners and
+// resolve a project selector to exactly one entry.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -142,26 +143,41 @@ function throwUnresponsive(hits: DiscoveredProject[], now: number): never {
   );
 }
 
-/** A selector with a path separator names a location, not a name fragment. */
-function isPathSelector(normSel: string): boolean {
-  return normSel.includes("/");
+/**
+ * A selector with a path separator names a location, not a name fragment.
+ * Checked on the raw text: normalization strips a trailing separator, and
+ * "VRChat/" or "C:\\" must still count as paths.
+ */
+function isPathSelector(sel: string): boolean {
+  return /[\\/]/.test(sel);
+}
+
+/** "c:/x", "/home/x", "//server/share" (normalized): only that exact location. */
+function isAbsoluteSelector(normSel: string): boolean {
+  return normSel.startsWith("/") || /^[a-z]:(\/|$)/.test(normSel);
 }
 
 /**
- * The selector names this project exactly: its normalized path, a trailing
- * part of it that ends at a folder boundary ("Projects/Avatar" names
- * ".../Projects/Avatar" but never ".../Avatar2"; a bare "Avatar" names the
- * folder), or - for a bare name - its project name.
+ * The selector names this project exactly:
+ * - an absolute path: that location and nothing else;
+ * - a relative path ("VRChat/Manuka", "Projects/Avatar"): whole folder names
+ *   inside the project path - never part of a folder name, so
+ *   "Projects/Avatar" cannot reach ".../Avatar2";
+ * - a bare name: the project folder or the project name, exactly.
  */
 function namesExactly(e: RegistryEntry, normSel: string, sel: string): boolean {
   const p = normalizeProjectPath(e.projectPath);
-  if (p === normSel || p.endsWith("/" + normSel)) return true;
-  return !isPathSelector(normSel) && e.projectName.toLowerCase() === sel.toLowerCase();
+  if (p === normSel) return true;
+  if (isPathSelector(sel)) {
+    if (isAbsoluteSelector(normSel)) return false;
+    return ("/" + p + "/").includes("/" + normSel + "/");
+  }
+  return p.endsWith("/" + normSel) || e.projectName.toLowerCase() === sel.toLowerCase();
 }
 
 /**
  * Resolve a selector to exactly one live registry entry.
- * Order: exact (path, folder-boundary path suffix, or project name) ->
+ * Order: exact (see namesExactly) ->
  * the exactly named project exists but is down: report that, never a
  * different project -> path selectors stop there -> name fragments fall back
  * to substring match (path or name) -> single-alive default.
@@ -195,7 +211,11 @@ export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
     if (exactDown.length > 0) {
       const blocked = exactDown.filter((d) => d.reason === "unresponsive");
       if (blocked.length > 0) throwUnresponsive(blocked, now);
-      throw makeError("PROJECT_NOT_FOUND", `the Unity project "${sel}" is not running`, {
+      const message = exactDown.some((d) => d.reason === "schema_mismatch")
+        ? `the Unity project "${sel}" is registered by an incompatible plugin version ` +
+          "(registry schema mismatch) - update the Unity package"
+        : `the Unity project "${sel}" is not running (its editor exited)`;
+      throw makeError("PROJECT_NOT_FOUND", message, {
         detail: {
           candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),
           registryDir: cfg.registryDir,
@@ -203,8 +223,8 @@ export function resolveProject(cfg: Config, selector?: string): RegistryEntry {
       });
     }
 
-    // A path names one location: no fuzzy fallback.
-    if (isPathSelector(normSel)) {
+    // A path names a location: no fuzzy fallback.
+    if (isPathSelector(sel)) {
       throw makeError("PROJECT_NOT_FOUND", `no running Unity project at "${sel}"`, {
         detail: {
           candidates: scanned.map((d) => candidateOf(d.entry, d.reason)),

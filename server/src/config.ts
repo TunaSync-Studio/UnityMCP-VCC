@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { loadStreamMode, type StreamModeState } from "./streamMode.js";
 
 export interface Config {
-  /** UNITY_MCP_PROJECT: project path substring used as the default selector. */
+  /** UNITY_MCP_PROJECT: default project selector (see resolveProject for the rules). */
   projectSelector: string | undefined;
   /** UNITY_MCP_REGISTRY_DIR override; default <localDataDir()>/UnityMCP/registry. */
   registryDir: string;
@@ -23,10 +23,37 @@ export interface Config {
    * hand-built test configs = disabled.
    */
   stream?: StreamModeState;
-  /** UNITY_MCP_ARM_FILE override for the vrc_upload human arm file. */
+  /** UNITY_MCP_ARM_FILE override for the vrc_upload human arm file (absolute paths only). */
   armFile?: string;
-  /** UNITY_MCP_ARM_TTL_MIN (minutes) for the arm file; default 30 min. */
+  /** UNITY_MCP_ARM_TTL_MIN (minutes) for the arm file; default 30, at most MAX_ARM_TTL_MIN. */
   armTtlMs?: number;
+}
+
+/** UNITY_MCP_ARM_TTL_MIN upper bound (24 h): an arm is meant to be short-lived. */
+export const MAX_ARM_TTL_MIN = 1440;
+
+const DECIMAL = /^\s*[+]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
+
+/**
+ * UNITY_MCP_ARM_TTL_MIN exactly as the plugin reads it (UploadArmClaim
+ * .ResolveTtlMinutes): a plain positive decimal - no hex, no "Infinity" -
+ * capped at MAX_ARM_TTL_MIN; anything else means the default.
+ */
+export function parseArmTtlMin(raw: string | undefined): number | undefined {
+  if (raw === undefined || !DECIMAL.test(raw)) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(n, MAX_ARM_TTL_MIN);
+}
+
+/**
+ * UNITY_MCP_ARM_FILE exactly as the plugin reads it (UploadArmClaim
+ * .ResolveArmFile): trimmed, and only an absolute path - a relative one would
+ * resolve against two different working directories (server vs editor).
+ */
+export function parseArmFile(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  return trimmed && trimmed.length > 0 && path.isAbsolute(trimmed) ? trimmed : undefined;
 }
 
 /**
@@ -70,12 +97,9 @@ export function loadConfig(
 
   const rawRecipes = env.UNITY_MCP_RECIPES_DIR?.trim();
 
-  const rawArmFile = env.UNITY_MCP_ARM_FILE?.trim();
-  const rawArmTtlMin = Number(env.UNITY_MCP_ARM_TTL_MIN ?? "");
-  const armTtlMs =
-    Number.isFinite(rawArmTtlMin) && rawArmTtlMin > 0
-      ? Math.floor(rawArmTtlMin * 60_000)
-      : undefined;
+  const armFile = parseArmFile(env.UNITY_MCP_ARM_FILE);
+  const armTtlMin = parseArmTtlMin(env.UNITY_MCP_ARM_TTL_MIN);
+  const armTtlMs = armTtlMin !== undefined ? Math.floor(armTtlMin * 60_000) : undefined;
 
   return {
     projectSelector,
@@ -83,7 +107,7 @@ export function loadConfig(
     defaultTimeoutMs,
     ...(rawRecipes && rawRecipes.length > 0 ? { recipesDir: rawRecipes } : {}),
     stream: loadStreamMode(env),
-    ...(rawArmFile && rawArmFile.length > 0 ? { armFile: rawArmFile } : {}),
+    ...(armFile !== undefined ? { armFile } : {}),
     ...(armTtlMs !== undefined ? { armTtlMs } : {}),
   };
 }

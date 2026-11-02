@@ -46,5 +46,31 @@ describe("server/plugin feature contract", () => {
     expect(pin).toBeGreaterThan(claim); // nothing is changed before the claim
     expect(invoke).toBeGreaterThan(pin);
     expect(src).toContain("UploadArmClaim.TryClaim(");
+    // SDK types are looked up before the claim (a missing one keeps the arm).
+    expect(src.indexOf("content data type not found", realUpload)).toBeLessThan(claim);
+    expect(src.indexOf("PickBuildAndUpload(iface, dataType)", realUpload)).toBeLessThan(claim);
+    // Run refuses a call without a usable arm (read-only) before RealUpload.
+    const runPreCheck = src.indexOf("UploadArmClaim.Inspect(");
+    expect(runPreCheck).toBeGreaterThan(-1);
+    expect(runPreCheck).toBeLessThan(src.indexOf("return await RealUpload("));
+  });
+
+  it("server and Unity package carry the same version everywhere", () => {
+    const root = path.resolve(here, "../..");
+    const read = (rel: string): string => fs.readFileSync(path.join(root, rel), "utf8");
+    const serverPkg = (JSON.parse(read("server/package.json")) as { version: string }).version;
+    const lock = JSON.parse(read("server/package-lock.json")) as {
+      version: string;
+      packages: Record<string, { version?: string }>;
+    };
+    const versionTs = /SERVER_VERSION = "([^"]+)"/.exec(read("server/src/version.ts"))?.[1];
+    const pluginPkg = (
+      JSON.parse(read("package/com.tunasync.unity-mcp/package.json")) as { version: string }
+    ).version;
+    const pluginConst = /PluginVersion = "([^"]+)"/.exec(
+      read("package/com.tunasync.unity-mcp/Editor/Bootstrap.cs"),
+    )?.[1];
+    const all = [serverPkg, lock.version, lock.packages[""]?.version, versionTs, pluginPkg, pluginConst];
+    expect(new Set(all).size, JSON.stringify(all)).toBe(1);
   });
 });

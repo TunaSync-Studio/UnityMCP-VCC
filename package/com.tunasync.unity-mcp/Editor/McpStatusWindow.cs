@@ -301,7 +301,8 @@ namespace TunaSync.UnityMCP.Editor
                 : arm.Expired ? McpLoc.Tr("upload.expired")
                 : McpLoc.Tr("upload.armed") + "  ·  " +
                     Math.Max(1, (int)Math.Ceiling(arm.Remaining.TotalMinutes)) + " min";
-            string text = state + "\n" + McpLoc.Tr("upload.explain");
+            string text = state + "\n" + McpLoc.Tr("upload.file") + ": " + arm.DisplayPath + "\n" +
+                McpLoc.Tr("upload.explain");
             if (arm.LockLeft) text += "\n" + McpLoc.Tr("upload.lockLeft");
             EditorGUILayout.HelpBox(text, type);
             // The lifetime the vrc.upload claim enforces (UNITY_MCP_ARM_TTL_MIN, default 30).

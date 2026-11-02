@@ -27,6 +27,20 @@ namespace TunaSync.UnityMCP.Editor
         /// <summary>An arm stamped further ahead than this is refused (clock moved back).</summary>
         internal const double FutureToleranceMinutes = 1.0;
 
+        /// <summary>UNITY_MCP_ARM_TTL_MIN upper bound (24 h), same as the server's MAX_ARM_TTL_MIN.</summary>
+        internal const double MaxTtlMinutes = 1440.0;
+
+        /// <summary>What a read-only look at the arm found (Inspect).</summary>
+        internal struct ArmStatus
+        {
+            public bool Exists;
+            /// <summary>Present, fresh and not future-dated: a claim would accept it.</summary>
+            public bool Usable;
+            public double RemainingMinutes;
+            /// <summary>Why it is not usable (null when usable).</summary>
+            public string Reason;
+        }
+
         // File.GetLastWriteTimeUtc's answer for a file that does not exist.
         private static readonly DateTime MissingFileTime = DateTime.FromFileTimeUtc(0);
 
@@ -59,14 +73,16 @@ namespace TunaSync.UnityMCP.Editor
 
         /// <summary>
         /// UNITY_MCP_ARM_FILE read the way the server reads it: trimmed, and
-        /// only when non-empty; otherwise the default arm location.
+        /// only an absolute path - a relative one would resolve against two
+        /// different working directories (editor vs server). Otherwise the
+        /// default arm location.
         /// </summary>
         internal static string ResolveArmFile(string envValue, string fallbackPath)
         {
             if (envValue != null)
             {
                 string trimmed = envValue.Trim();
-                if (trimmed.Length > 0) return trimmed;
+                if (trimmed.Length > 0 && Path.IsPathRooted(trimmed)) return trimmed;
             }
             return fallbackPath;
         }
@@ -83,9 +99,50 @@ namespace TunaSync.UnityMCP.Editor
                 double.TryParse(envValue.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) &&
                 parsed > 0 && !double.IsInfinity(parsed))
             {
-                return parsed;
+                return Math.Min(parsed, MaxTtlMinutes);
             }
             return fallbackMinutes;
+        }
+
+        /// <summary>
+        /// Read-only look at the arm with the same rules a claim applies
+        /// (exists, TTL, not future-dated). Never consumes it: used for the
+        /// early refusal before touching the SDK and for Creator Console, so
+        /// what the Console shows and what the gate accepts cannot differ.
+        /// </summary>
+        internal static ArmStatus Inspect(string file, double ttlMinutes)
+        {
+            ArmStatus status = new ArmStatus { Reason = NotFound };
+            try
+            {
+                if (string.IsNullOrEmpty(file) || !File.Exists(file)) return status;
+                DateTime written = File.GetLastWriteTimeUtc(file);
+                if (written == MissingFileTime) return status;
+                status.Exists = true;
+                double ageMin = (DateTime.UtcNow - written).TotalMinutes;
+                if (ageMin < -FutureToleranceMinutes)
+                {
+                    status.Reason = "arm file timestamp is " + Math.Round(-ageMin) +
+                        " min in the future (was the clock changed?)";
+                    return status;
+                }
+                if (ageMin > ttlMinutes)
+                {
+                    status.Reason = "arm file expired (age " + Math.Round(ageMin) + " min > TTL " +
+                        Math.Round(ttlMinutes) + " min)";
+                    return status;
+                }
+                status.Usable = true;
+                status.RemainingMinutes = Math.Max(0, ttlMinutes - ageMin);
+                status.Reason = null;
+                return status;
+            }
+            catch (Exception ex)
+            {
+                status.Usable = false;
+                status.Reason = "arm file could not be read (" + ex.GetType().Name + ")";
+                return status;
+            }
         }
 
         /// <summary>

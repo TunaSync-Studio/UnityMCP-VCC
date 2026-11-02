@@ -15,6 +15,8 @@ MCP host) connect as TCP clients.
   trailing slash stripped, lower-cased (Windows). On bind failure probe
   `+1..+8`, then port 0 (OS-assigned). Registry is source of truth.
 - Discovery registry: `%LOCALAPPDATA%\UnityMCP\registry\<fnv1a32-hex8>.json`
+  (macOS/Linux: `$XDG_DATA_HOME`, else `~/.local/share`, + `/UnityMCP/registry`
+  on both sides; `UNITY_MCP_REGISTRY_DIR` overrides it for both)
   written by plugin (atomic: temp file + File.Replace), touched every 60 s,
   deleted on quit. Startup sweeps sibling files whose `pid` is dead.
 

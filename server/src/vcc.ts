@@ -13,6 +13,7 @@ import { execFile, spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { localDataDir } from "./config.js";
 
 export interface VccProjectEntry {
   path: string;
@@ -397,11 +398,8 @@ export function vpmActionSpec(
 function registryDir(): string {
   const override = process.env.UNITY_MCP_REGISTRY_DIR;
   if (override && override.length > 0) return override;
-  const localAppData =
-    process.env.LOCALAPPDATA && process.env.LOCALAPPDATA.length > 0
-      ? process.env.LOCALAPPDATA
-      : path.join(os.homedir(), "AppData", "Local");
-  return path.join(localAppData, "UnityMCP", "registry");
+  // Same folder as config.registryDir and the plugin (see localDataDir()).
+  return path.join(localDataDir(), "UnityMCP", "registry");
 }
 
 function samePath(a: string, b: string): boolean {

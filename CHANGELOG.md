@@ -48,23 +48,38 @@ Unity plugin + npm server release. Publish both together: a real
   lifetime**: both honor `UNITY_MCP_ARM_FILE` / `UNITY_MCP_ARM_TTL_MIN`
   from the Unity Editor's environment. Before, the Console armed and
   showed the default path with a fixed 30 minutes while the claim honored
-  the overrides. The Console labels show the effective lifetime.
+  the overrides. The Console evaluates the arm with the claim's own rules
+  (`UploadArmClaim.Inspect`), so it no longer showed DISARMED for a huge
+  lifetime the gate accepted, or ARMED for a future-dated arm the gate
+  discards; it shows the arm file and the effective lifetime.
+- A call without a usable arm is refused before the SDK control panel is
+  opened (read-only check), and the SDK types the upload needs are looked
+  up before the claim, so a missing type no longer uses up the arm.
+- `tools/disarm-vrc-upload.bat` broke on its own "(no arm file)" message
+  (unescaped parenthesis inside a block).
 - **A project selector could switch projects**: a pooled client is
   pinned by full path and re-resolves on every reconnect, and while that
   editor was restarting the substring fallback could connect it to
   another project whose path contains it (`.../Avatar` -> `.../Avatar2`).
-  A selector with a path separator now names exactly one location (the
-  full path, or a trailing path that ends at a folder boundary) and never
-  falls back to substring matching; a bare name prefers the project whose
-  name or folder is exactly that name; and when the exactly named project
-  is registered but down, the call says so instead of picking another.
+  An absolute path now selects only that project and a relative path
+  matches whole folder names (never part of one), with no substring
+  fallback for either; a bare name prefers the project whose name or
+  folder is exactly that name; when the exactly named project is
+  registered but down, the call says so instead of picking another; and a
+  selector keeps meaning the project it first resolved to for the rest of
+  the server session - an editor that quits removes its registry entry, so
+  a bare `milfy_neo01` used to fall through to `milfy_neo01_jacket` while
+  it restarted.
 - **macOS/Linux defaults**: the server's default registry and arm folder
   now match the plugin's `LocalApplicationData` (`$XDG_DATA_HOME`, else
   `~/.local/share` - what Unity's Mono answers on macOS and Linux).
   Through 2.6.8 the server looked under `~/AppData/Local` there, so the
   two sides never met unless `UNITY_MCP_REGISTRY_DIR` (and
-  `UNITY_MCP_ARM_FILE`) were set for both. An explicit `LOCALAPPDATA` is
-  still honored first.
+  `UNITY_MCP_ARM_FILE`) were set for both. `unity_editor` status/launch and
+  the `vpm_manage` library check use the same folder. An explicit
+  `LOCALAPPDATA` is still honored first (the plugin ignores it), and on
+  macOS an editor started from Unity Hub does not see variables set only
+  in a shell.
 - Tests: the server arm tests now emulate the plugin-side gate of each
   plugin generation (claim / read-only check / none); the old test only
   asserted that the server deleted the file, which is how the conflict
@@ -84,9 +99,17 @@ Unity plugin + npm server release. Publish both together: a real
   submitted, the arm left in place; `dry_run` is unaffected). An older
   server with the new plugin also fails safe: the plugin refuses with
   "arm file not found" and a hint to update the server.
-- A bare project name that exactly matches one project's name or folder
-  now selects it even when other projects contain that name (it used to
-  be `PROJECT_AMBIGUOUS`).
+- Project selectors (see Fixed): an absolute path is exact-only, a
+  relative path must match whole folder names (`VRChat/Manuka` works,
+  `VRChat/Man` does not), a bare name that exactly matches one project's
+  name or folder selects it even when other projects contain that name
+  (it used to be `PROJECT_AMBIGUOUS`), and a selector's meaning is kept for
+  the server session.
+- `UNITY_MCP_ARM_TTL_MIN` must be a plain positive number and is capped
+  at 1440 minutes on both sides (`0x10` used to mean 16 minutes on the
+  server and the default on the plugin); `UNITY_MCP_ARM_FILE` must be an
+  absolute path everywhere (a relative value is ignored), and
+  `tools/*-vrc-upload.bat` honor it.
 
 ## [2.6.8] - 2026-08-12
 

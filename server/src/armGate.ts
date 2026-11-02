@@ -36,6 +36,8 @@ export interface ArmCheck {
   armed: boolean;
   file: string;
   detail: string;
+  /** Effective lifetime in minutes (UNITY_MCP_ARM_TTL_MIN, default 30). */
+  ttlMin?: number;
 }
 
 export function armFilePath(
@@ -54,11 +56,12 @@ export function checkArm(
 ): ArmCheck {
   const file = armFilePath(cfg);
   const ttlMs = cfg.armTtlMs ?? DEFAULT_ARM_TTL_MS;
+  const ttlMin = ttlMs / 60_000;
   let st: fs.Stats;
   try {
     st = fs.statSync(file);
   } catch {
-    return { armed: false, file, detail: "arm file not found" };
+    return { armed: false, file, detail: "arm file not found", ttlMin };
   }
   const ageMs = now - st.mtimeMs;
   // Same rule as the plugin's UploadArmClaim: a future-dated arm (armed, then
@@ -70,6 +73,7 @@ export function checkArm(
       detail:
         `arm file timestamp is ${Math.round(-ageMs / 60000)} min in the future ` +
         "(was the clock changed?)",
+      ttlMin,
     };
   }
   if (ageMs > ttlMs) {
@@ -79,9 +83,10 @@ export function checkArm(
       detail:
         `arm file expired (age ${Math.round(ageMs / 60000)} min > ` +
         `TTL ${Math.round(ttlMs / 60000)} min)`,
+      ttlMin,
     };
   }
-  return { armed: true, file, detail: `armed (age ${Math.round(ageMs / 1000)} s)` };
+  return { armed: true, file, detail: `armed (age ${Math.round(ageMs / 1000)} s)`, ttlMin };
 }
 
 /**
@@ -96,10 +101,12 @@ export function armRequiredResult(arm: ArmCheck): CallToolResult {
   const message =
     `A real vrc_upload additionally requires a human-created ` +
     `one-shot arm file: ${arm.file} (${arm.detail}). ` +
-    "The human operator arms it by running tools\\arm-vrc-upload.bat " +
-    "(TTL 30 min, consumed by the Unity plugin when the upload starts). If " +
-    "you are an AI agent: do NOT create this file yourself - stop and ask the " +
-    "operator to arm, then retry.";
+    "The human operator arms it in Creator Console (VRC upload safety gate) or " +
+    "with tools\\arm-vrc-upload.bat; it expires after " +
+    `${Number((arm.ttlMin ?? DEFAULT_ARM_TTL_MS / 60_000).toFixed(2))} min and is ` +
+    "consumed by the Unity plugin when the upload starts. If you are an AI " +
+    "agent: do NOT create this file yourself - stop and ask the operator to arm, " +
+    "then retry.";
   // F-17: hand-built early-return errors carry the same server identity block
   // as fail() responses - this is exactly the moment a caller needs to know
   // which server/build refused the upload.

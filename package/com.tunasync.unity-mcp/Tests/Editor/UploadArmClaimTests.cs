@@ -107,11 +107,54 @@ namespace TunaSync.UnityMCP.Editor.Tests
         [Test]
         public void ArmFileOverrideIsReadLikeTheServer()
         {
-            // UNITY_MCP_ARM_FILE: trimmed, used only when non-empty.
-            Assert.AreEqual("/x/vrc-upload.arm", UploadArmClaim.ResolveArmFile(" /x/vrc-upload.arm ", "/d.arm"));
+            // UNITY_MCP_ARM_FILE: trimmed, and only an absolute path (a relative
+            // one would resolve against the editor's and the server's different
+            // working directories).
+            string absolute = Path.Combine(Path.GetTempPath(), "x", "vrc-upload.arm");
+            Assert.AreEqual(absolute, UploadArmClaim.ResolveArmFile(" " + absolute + " ", "/d.arm"));
+            Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile("relative/vrc-upload.arm", "/d.arm"));
             Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile("", "/d.arm"));
             Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile("   ", "/d.arm"));
             Assert.AreEqual("/d.arm", UploadArmClaim.ResolveArmFile(null, "/d.arm"));
+        }
+
+        [Test]
+        public void TtlOverrideIsCappedAtOneDay()
+        {
+            // A huge value used to overflow the Console's status while the gate
+            // still accepted the arm; both sides now cap it like the server.
+            Assert.AreEqual(1440d, UploadArmClaim.ResolveTtlMinutes("1e10", 30));
+            Assert.AreEqual(1440d, UploadArmClaim.ResolveTtlMinutes("2000", 30));
+            Assert.AreEqual(1440d, UploadArmClaim.ResolveTtlMinutes("1440", 30));
+        }
+
+        [Test]
+        public void InspectReportsWithoutConsuming()
+        {
+            UploadArmClaim.ArmStatus missing = UploadArmClaim.Inspect(arm, 30);
+            Assert.IsFalse(missing.Exists);
+            Assert.IsFalse(missing.Usable);
+            Assert.AreEqual(UploadArmClaim.NotFound, missing.Reason);
+
+            File.WriteAllText(arm, "armed");
+            UploadArmClaim.ArmStatus fresh = UploadArmClaim.Inspect(arm, 30);
+            Assert.IsTrue(fresh.Usable);
+            Assert.IsNull(fresh.Reason);
+            Assert.That(fresh.RemainingMinutes, Is.InRange(29.0, 30.0));
+            Assert.IsTrue(File.Exists(arm), "Inspect never consumes the arm");
+
+            File.SetLastWriteTimeUtc(arm, DateTime.UtcNow.AddMinutes(-31));
+            UploadArmClaim.ArmStatus expired = UploadArmClaim.Inspect(arm, 30);
+            Assert.IsTrue(expired.Exists);
+            Assert.IsFalse(expired.Usable);
+            StringAssert.Contains("expired", expired.Reason);
+
+            File.SetLastWriteTimeUtc(arm, DateTime.UtcNow.AddMinutes(10));
+            UploadArmClaim.ArmStatus future = UploadArmClaim.Inspect(arm, 30);
+            Assert.IsTrue(future.Exists);
+            Assert.IsFalse(future.Usable);
+            StringAssert.Contains("in the future", future.Reason);
+            Assert.IsTrue(File.Exists(arm));
         }
 
         [TestCase("")]

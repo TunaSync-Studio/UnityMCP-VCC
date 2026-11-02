@@ -116,7 +116,12 @@ function sleep(ms: number): Promise<void> {
 const projectArg = z
   .string()
   .optional()
-  .describe("Project path or name substring; optional when only one Unity is running");
+  .describe(
+    "Project: a full path (that project only), a relative path of whole folder names, " +
+      "or a project/folder name (exact first, else a unique substring). A selector keeps " +
+      "meaning the project it first resolved to in this session. Optional when only one " +
+      "Unity is running",
+  );
 
 // F-21: health verdict threshold for a stalled editor main thread. Keep in
 // lockstep with the plugin's Dispatcher.BusyModalThresholdMs (3000).
@@ -943,8 +948,9 @@ const toolTable: readonly ToolRegistrar[] = [
       "requires BOTH confirm:true (ask the user for fresh approval of THIS " +
       "upload before setting it; a general request to work on the avatar is " +
       "not that approval) AND a human-created one-shot arm file " +
-      "(tools\\arm-vrc-upload.bat, TTL 30 min, consumed by the Unity plugin " +
-      "when the upload starts) - never create the arm file yourself. On wait " +
+      "(Creator Console or tools\\arm-vrc-upload.bat; 30 min by default; the Unity " +
+      "plugin consumes it when the upload starts) - never create the arm file " +
+      "yourself. On wait " +
       "timeout the job keeps " +
       "running and the jobId is reported for job_status.",
     {

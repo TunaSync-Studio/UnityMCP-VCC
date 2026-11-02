@@ -21,6 +21,8 @@ namespace TunaSync.UnityMCP.Editor
         public bool Expired;
         public TimeSpan Remaining;
         public string Path;
+        /// <summary>Path for display, the home folder shortened to "~".</summary>
+        public string DisplayPath;
         public double TtlMinutes;
         /// <summary>A claim lock left behind by a crashed editor (refuses every claim).</summary>
         public bool LockLeft;
@@ -115,22 +117,45 @@ namespace TunaSync.UnityMCP.Editor
         {
             string path = UploadArmPath;
             double ttlMinutes = UploadArmTtlMinutes;
-            UploadArmSnapshot snapshot = new UploadArmSnapshot { Path = path, TtlMinutes = ttlMinutes };
+            UploadArmSnapshot snapshot = new UploadArmSnapshot
+            {
+                Path = path,
+                DisplayPath = HomeShortened(path),
+                TtlMinutes = ttlMinutes,
+            };
             try
             {
                 snapshot.LockLeft = File.Exists(UploadArmClaim.LockPathFor(path));
                 snapshot.Exists = File.Exists(path);
-                if (!snapshot.Exists) return snapshot;
-                DateTime expires = File.GetLastWriteTimeUtc(path) + TimeSpan.FromMinutes(ttlMinutes);
-                snapshot.Remaining = expires - DateTime.UtcNow;
-                snapshot.Expired = snapshot.Remaining <= TimeSpan.Zero;
-                if (snapshot.Expired) snapshot.Remaining = TimeSpan.Zero;
             }
             catch
             {
-                snapshot.Exists = false;
+                // File.Exists does not throw; keep the defaults if anything does.
             }
+            if (!snapshot.Exists) return snapshot;
+            // Same rules as the claim (TTL, future-dated, unreadable): what the
+            // Console shows as usable is exactly what the gate accepts.
+            UploadArmClaim.ArmStatus status = UploadArmClaim.Inspect(path, ttlMinutes);
+            snapshot.Expired = !status.Usable;
+            snapshot.Remaining = status.Usable ? TimeSpan.FromMinutes(status.RemainingMinutes) : TimeSpan.Zero;
             return snapshot;
+        }
+
+        private static string HomeShortened(string path)
+        {
+            try
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (!string.IsNullOrEmpty(home) && !string.IsNullOrEmpty(path) &&
+                    path.StartsWith(home, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "~" + path.Substring(home.Length);
+                }
+            }
+            catch
+            {
+            }
+            return path;
         }
 
         /// <summary>HUMAN OPERATOR UI ONLY. Never call from an MCP handler.</summary>

@@ -130,6 +130,7 @@ namespace TunaSync.UnityMCP.Editor
             ["upload.disarmed"] = new[] { "DISARMED", "未許可" },
             ["upload.expired"] = new[] { "EXPIRED (not usable)", "期限切れ (使用不可)" },
             ["upload.armed"] = new[] { "ARMED for one upload", "アップロード1回を許可中" },
+            ["upload.file"] = new[] { "Arm file", "許可ファイル" },
             ["upload.lockLeft"] = new[]
             {
                 "A claim lock was left behind (an editor stopped while claiming the arm): every real upload is refused until it is cleared. Disarm or Arm clears it.",

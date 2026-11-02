@@ -59,14 +59,14 @@ run and the tests are silently skipped (exit code 0, no results XML).
 - Arm gate end to end, without publishing: in Creator Console, Disarm
   until it shows DISARMED with no leftover-lock notice (the Console reads
   the same arm file the plugin claims, including any `UNITY_MCP_ARM_FILE`
-  in the Unity Editor's environment), and log in to the VRChat SDK control
-  panel (the claim runs once the SDK builder is ready). Start the MCP
+  in the Unity Editor's environment). Start the MCP
   server with `UNITY_MCP_ARM_FILE` pointing at a separate file (e.g.
   `%TEMP%\unitymcp-smoke.arm`) and create that file; the Console must
   still show DISARMED (if it shows ARMED, the editor uses the same file -
   stop and delete it). Then `vrc_upload {target:"avatar", confirm:true}`
-  must be refused by the plugin with "arm file not found" (the server's
-  pre-check passed; the file the plugin claims does not exist), and
+  must be refused by the plugin with "arm file not found" before it opens
+  the SDK control panel (the server's pre-check passed; the file the plugin
+  checks does not exist), and
   `%TEMP%\unitymcp-smoke.arm` must still exist (the server never consumes
   the arm). The plugin never sees an arm here, so nothing can be
   published. Delete the smoke file afterwards.
