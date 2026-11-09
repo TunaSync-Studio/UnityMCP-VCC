@@ -351,6 +351,35 @@
           ],
           "url": "https://tunasync-studio.github.io/UnityMCP-VCC/vpm/com.tunasync.unity-mcp-2.6.9.zip",
           "zipSHA256": "24F872BF700D8FA6BD0C10832AC02CEDB415EF8719FEB7316266749B4C65B048"
+        },
+        "2.6.10": {
+          "name": "com.tunasync.unity-mcp",
+          "displayName": "TunaSync Unity MCP",
+          "version": "2.6.10",
+          "unity": "2022.3",
+          "description": "Local-first Unity Editor bridge for Codex, Claude, Cursor and other MCP hosts. Includes a Creator Console, loopback transport, jobs, diagnostics, write lease and human-gated VRChat uploads.",
+          "author": {
+            "name": "TunaSync"
+          },
+          "license": "MIT",
+          "documentationUrl": "https://github.com/TunaSync-Studio/UnityMCP-VCC",
+          "changelogUrl": "https://github.com/TunaSync-Studio/UnityMCP-VCC/blob/main/CHANGELOG.md",
+          "dependencies": {
+            "com.unity.nuget.newtonsoft-json": "3.2.1"
+          },
+          "legacyFolders": {
+            "Assets\\UnityMCPPlugin": ""
+          },
+          "keywords": [
+            "mcp",
+            "claude",
+            "codex",
+            "editor-automation",
+            "tcp",
+            "vrchat"
+          ],
+          "url": "https://tunasync-studio.github.io/UnityMCP-VCC/vpm/com.tunasync.unity-mcp-2.6.10.zip",
+          "zipSHA256": "A3E4E5A98FD93040FB14D7DE9FA750F8D0E726F44B517ADC7CD49917FFE8344C"
         }
       }
     }
