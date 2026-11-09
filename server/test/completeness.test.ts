@@ -10,6 +10,7 @@ import {
   cleanDerivedLibrary,
   editorOpenOn,
   findUnityPidByProject,
+  isAllowedNativeDialogButton,
   pickUnityEditorPid,
   projectEditorVersion,
   readEditorRegistry,
@@ -17,6 +18,17 @@ import {
   unityLockfilePresent,
   vpmActionSpec,
 } from "../src/vcc.js";
+
+describe("native dialog click guard", () => {
+  it("permits only the exact affirmative OK label", () => {
+    expect(isAllowedNativeDialogButton("OK")).toBe(true);
+    expect(isAllowedNativeDialogButton("&OK")).toBe(true);
+    expect(isAllowedNativeDialogButton("Cancel")).toBe(false);
+    expect(isAllowedNativeDialogButton("Yes")).toBe(false);
+    expect(isAllowedNativeDialogButton("Discard")).toBe(false);
+    expect(isAllowedNativeDialogButton("ok")).toBe(false);
+  });
+});
 
 describe("vpm upgrade spec (P1-1)", () => {
   it("upgrades everything in the project without a package", () => {

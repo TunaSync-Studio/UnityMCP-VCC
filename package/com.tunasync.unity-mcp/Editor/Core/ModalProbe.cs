@@ -95,7 +95,7 @@ namespace TunaSync.UnityMCP.Editor
                     }, IntPtr.Zero);
                     info.kind = (hasProgressBar || (info.title != null && BusyCounter.IsMatch(info.title)))
                         ? "progress"
-                        : "decision";
+                        : IsHumanOnly(info.title, info.buttons) ? "human-only" : "decision";
                     found.Add(info);
                     return true;
                 }, IntPtr.Zero);
@@ -115,6 +115,24 @@ namespace TunaSync.UnityMCP.Editor
                 // decorates.
                 return null;
             }
+        }
+
+        // Same title rule as the server's NATIVE_DIALOG_REFUSE_TITLE (vcc.ts).
+        private static readonly System.Text.RegularExpressions.Regex HumanOnlyTitle =
+            new System.Text.RegularExpressions.Regex(
+                "copyright|agree|terms|consent|certif|ownership|licen[cs]e|eula|privacy|account|log ?in|log ?out|sign ?in|sign ?out|rights" +
+                "|同意|規約|著作権|権利|ライセンス|使用許諾|利用許諾|アカウント|ログイン|ログアウト|サインイン|サインアウト|プライバシー|承諾|宣誓",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// 2.6.10: a dialog that records the user's own decision - more than one
+        /// choice, or a certification / terms / consent / account prompt. The
+        /// server's native_dialog refuses these; the user answers them in the UI.
+        /// </summary>
+        internal static bool IsHumanOnly(string title, List<string> buttons)
+        {
+            if (buttons == null || buttons.Count != 1) return true;
+            return !string.IsNullOrEmpty(title) && HumanOnlyTitle.IsMatch(title);
         }
 
         private static bool ClassNameIs(IntPtr hWnd, string expected)

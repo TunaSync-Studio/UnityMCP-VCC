@@ -1,4 +1,4 @@
-// MCP tool surface (18 tools as of v2.6.0). Tools are declared in a small table
+// MCP tool surface (19 tools as of v2.6.10). Tools are declared in a small table
 // so later phases can append entries without touching the registration
 // plumbing. Every handler is wrapped: UnityClient errors become
 // "[CODE] message" content plus a structured detail JSON block - a tool never
@@ -26,6 +26,8 @@ import {
   VRC_GET_INSTALL_HINT,
   VrcGetTimeoutError,
   cleanDerivedLibrary,
+  clickNativeDialogButton,
+  nativeDialogClickRefusal,
   closeProcessGracefully,
   createProject,
   defaultRunner,
@@ -473,6 +475,10 @@ const TOOL_ANNOTATIONS = {
   // launch spawns a process, quit terminates one (forced kill can corrupt
   // Library) - status alone would be read-only, strongest side wins.
   unity_editor: DESTRUCTIVE_LOCAL_TOOL,
+  // Can dismiss a single-button error notice that blocks an external publish
+  // already in progress (never a consent/certification prompt - those are
+  // refused as human-only), so classify by the strongest side effect.
+  native_dialog: DESTRUCTIVE_OPEN_WORLD_TOOL,
   // imports can overwrite existing assets at the same paths.
   asset_import: DESTRUCTIVE_LOCAL_TOOL,
   vrc_menu: READ_ONLY_TOOL,
@@ -942,8 +948,8 @@ const toolTable: readonly ToolRegistrar[] = [
       "vrc.upload + job.wait) with progress. dry_run validates without " +
       "uploading (world checks: SceneDescriptor, PipelineManager/blueprintId, " +
       "AudioListeners, spawns, ReferenceCamera, RespawnHeightY, script compile " +
-      "state, BuildTarget, ColorSpace, thumbnail; NOT lightmaps/layers/shader " +
-      "scans). Omitting dry_run (or dry_run:false) selects the REAL path. " +
+      "state, BuildTarget, ColorSpace, VRChat layers/collision matrix, thumbnail; " +
+      "NOT lightmaps/shader scans). Omitting dry_run (or dry_run:false) selects the REAL path. " +
       "A REAL upload PUBLISHES content and therefore " +
       "requires BOTH confirm:true (ask the user for fresh approval of THIS " +
       "upload before setting it; a general request to work on the avatar is " +
@@ -1496,6 +1502,138 @@ const toolTable: readonly ToolRegistrar[] = [
         }
       }
       return ok(body);
+    },
+  ),
+
+  tool(
+    "native_dialog",
+    "Click exactly one visible Windows native dialog owned by the Unity " +
+      "Editor for an exact project. This editorless escape hatch works while " +
+      "Unity's main thread is blocked by the modal loop. It requires a fresh " +
+      "user-approved confirm:true, an exact expected_title, and supports only " +
+      "the exact affirmative button 'OK' on a single-button notice. It refuses " +
+      "zero/multiple dialog or button matches, never guesses or clicks " +
+      "Cancel/No/Discard, and never answers human-only dialogs: anything with " +
+      "more than one button, or a copyright certification, terms, consent, " +
+      "license or account prompt - the user answers those in Unity themselves.",
+    {
+      project: z
+        .string()
+        .min(1)
+        .describe("Exact Unity project directory whose interactive editor owns the dialog"),
+      expected_title: z
+        .string()
+        .min(1)
+        .max(256)
+        .describe("Exact case-sensitive native dialog title observed by unity_health_check"),
+      button: z.literal("OK").describe("Only the exact affirmative button OK is supported"),
+      confirm: z
+        .boolean()
+        .describe("Must be true only after the user explicitly approves this dialog decision"),
+    },
+    async (args) => {
+      if (args.confirm !== true) {
+        return fail(
+          new UnityMcpError({
+            code: "INVALID_PARAMS",
+            message:
+              "native_dialog: confirm:true requires fresh user approval for this exact dialog decision",
+            retryable: false,
+          }),
+        );
+      }
+      const pid = findUnityPidByProject(args.project);
+      if (pid === undefined) {
+        return fail(
+          new UnityMcpError({
+            code: "PROJECT_NOT_FOUND",
+            message:
+              "native_dialog: no single interactive Unity editor process exactly matches this project",
+            retryable: false,
+            detail: { project: args.project },
+          }),
+        );
+      }
+      const dialogs = describeNativeDialogs(pid);
+      const matches = dialogs.filter((d) => d.title === args.expected_title);
+      const visibleDialogs = dialogs.map((d) => ({ title: d.title, buttons: d.buttons }));
+      if (matches.length !== 1) {
+        return fail(
+          new UnityMcpError({
+            code: "BUSY_MODAL",
+            message:
+              `native_dialog: expected exactly one '${args.expected_title}' dialog, found ${matches.length}`,
+            retryable: true,
+            detail: { pid, visibleDialogs },
+          }),
+        );
+      }
+      const refusal = matches[0] ? nativeDialogClickRefusal(matches[0]) : undefined;
+      if (refusal !== undefined) {
+        return fail(
+          new UnityMcpError({
+            code: "INVALID_PARAMS",
+            message:
+              `native_dialog: refused - ${refusal}. Certifications, terms, consent and ` +
+              "account prompts are the user's own decision: ask the user to answer it " +
+              "in the Unity Editor themselves. confirm:true does not change this.",
+            retryable: false,
+            detail: { pid, dialog: visibleDialogs.find((d) => d.title === args.expected_title) },
+          }),
+        );
+      }
+      const buttonMatches = matches[0]?.buttons.filter((b) => b === args.button).length ?? 0;
+      if (buttonMatches !== 1) {
+        return fail(
+          new UnityMcpError({
+            code: "BUSY_MODAL",
+            message:
+              `native_dialog: expected exactly one '${args.button}' button, found ${buttonMatches}`,
+            retryable: true,
+            detail: { pid, dialog: visibleDialogs.find((d) => d.title === args.expected_title) },
+          }),
+        );
+      }
+      const clicked = clickNativeDialogButton(pid, args.expected_title, args.button);
+      if (!clicked.clicked && clicked.reason?.startsWith("human-only") === true) {
+        return fail(
+          new UnityMcpError({
+            code: "INVALID_PARAMS",
+            message:
+              `native_dialog: refused at click time - ${clicked.reason}. Ask the user to ` +
+              "answer it in the Unity Editor themselves.",
+            retryable: false,
+            detail: clicked,
+          }),
+        );
+      }
+      if (!clicked.clicked) {
+        return fail(
+          new UnityMcpError({
+            code: "BUSY_MODAL",
+            message: `native_dialog: exact OK click failed (${clicked.reason ?? "unknown reason"})`,
+            retryable: true,
+            detail: clicked,
+          }),
+        );
+      }
+
+      let dialogDismissed = false;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await sleep(250 * (attempt + 1));
+        if (
+          describeNativeDialogs(pid).every((d) => d.title !== args.expected_title)
+        ) {
+          dialogDismissed = true;
+          break;
+        }
+      }
+      return ok({
+        ...clicked,
+        project: args.project,
+        dialogDismissed,
+        verifiedAt: new Date().toISOString(),
+      });
     },
   ),
 

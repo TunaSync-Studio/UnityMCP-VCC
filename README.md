@@ -71,7 +71,7 @@ package/com.tunasync.unity-mcp  (Editor-only VPM/UPM package)
 - Kill switch: create `UnityMCP.disabled` at the project root (menu:
   Tools > TunaSync Unity MCP > Toggle Disabled Marker).
 
-## Tool surface (18)
+## Tool surface (19)
 
 `execute_editor_command` (C# eval, `run_as_job` for long snippets),
 `get_editor_state` (sectioned + `max_bytes` guard), `scene_query`,
@@ -106,7 +106,11 @@ When an editor is blocked, `BUSY_MODAL` errors and `unity_health_check`
 name the native dialog that is holding it (title, buttons, and whether it
 is a self-clearing progress dialog or a decision a human must answer) —
 probed via user32 on the plugin's transport thread, so it works exactly
-while the main thread is stuck.
+while the main thread is stuck. `native_dialog` can then dismiss a
+single-button error notice with the exact `OK` (user-approved
+`confirm:true`); dialogs that are the user's own decision — anything with
+more than one button, copyright certifications, terms, consent and account
+prompts — are reported as `human-only` and are never answered by the tool.
 
 Everything the legacy 426 tools did is preserved as 412 shipped **recipes**
 (`recipes/`): markdown files whose fenced C# block you can paste into

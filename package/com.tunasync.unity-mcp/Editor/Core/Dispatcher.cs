@@ -219,6 +219,8 @@ namespace TunaSync.UnityMCP.Editor
                     // abort live imports. Route the advice by kind.
                     string advice = m.kind == "progress"
                         ? "\n  This is a progress dialog; it clears itself. Do NOT press Cancel - that aborts the operation. Retry after it finishes."
+                        : m.kind == "human-only"
+                        ? "\n  This dialog is the user's own decision (a choice, certification, terms, consent or account prompt). Ask the user to answer it in the editor UI; native_dialog will refuse it."
                         : "\n  A human must dismiss this dialog in the editor UI; retrying alone will not clear it.";
                     modalLine = "\n  modal: \"" + m.title + "\"  buttons: [" +
                         string.Join(", ", m.buttons.ToArray()) + "]  kind: " + m.kind +

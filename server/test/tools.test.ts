@@ -292,7 +292,7 @@ describe("tools over MCP", () => {
     }
   });
 
-  it("lists all 18 tools", async () => {
+  it("lists all 19 tools", async () => {
     h = await setup();
     const listed = await h.mcp.listTools();
     const names = listed.tools.map((t) => t.name).sort();
@@ -307,6 +307,7 @@ describe("tools over MCP", () => {
         "job_cancel",
         "job_status",
         "ndmf_bake_run",
+        "native_dialog",
         "scene_query",
         "session_lease",
         "unity_editor",
@@ -318,7 +319,7 @@ describe("tools over MCP", () => {
         "vrc_upload",
       ].sort(),
     );
-    expect(names).toHaveLength(18);
+    expect(names).toHaveLength(19);
   });
 
   it("exposes recipes as recipe:// resources", async () => {

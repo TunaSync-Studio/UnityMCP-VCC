@@ -433,8 +433,8 @@ export interface OsProcessLine {
  *   and force-killing one mid-import is the exact Library corruption this
  *   fallback warns about. Batch processes are never the interactive editor.
  * - The -projectPath VALUE is extracted and compared with samePath() -
- *   substring matching grabbed `milfy_neo01_jacket` when asked for
- *   `milfy_neo01` (three such prefix pairs existed on the field machine).
+ *   substring matching grabbed `fox_neo01_jacket` when asked for
+ *   `fox_neo01` (three such prefix pairs existed on the field machine).
  * - More than one surviving candidate = ambiguity; return nothing rather
  *   than quit/kill a coin-flip pick.
  */
@@ -461,6 +461,16 @@ export interface NativeDialog {
   text?: string;
 }
 
+export interface NativeDialogClickResult {
+  clicked: boolean;
+  pid: number;
+  title: string;
+  button: string;
+  dialogMatches: number;
+  buttonMatches: number;
+  reason?: string;
+}
+
 // F-15: BUSY_MODAL can only name a dialog once the PLUGIN is loaded. A modal
 // that blocks Unity *during startup* - the New Input System backend prompt on
 // a world project, a Safe Mode question, an upgrade confirm - therefore hits
@@ -469,6 +479,7 @@ export interface NativeDialog {
 // prompt or long import may be in the way"). The server can see it from the OS
 // side, so it should say which. Detection only - never presses a button.
 const DIALOG_PROBE_PS = `
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type @"
 using System; using System.Text; using System.Runtime.InteropServices;
 public class McpDlg {
@@ -493,16 +504,209 @@ $null = [McpDlg]::EnumWindows({ param($h,$l)
   if (-not [McpDlg]::IsWindowVisible($h)) { return $true }
   if ([McpDlg]::C($h) -ne '#32770') { return $true }
   $btns = New-Object System.Collections.ArrayList
-  $body = ''
+  # Collected in a shared list: a plain "$body = ..." inside the nested
+  # callback would write a different scope and the text would always be empty.
+  $texts = New-Object System.Collections.ArrayList
   $null = [McpDlg]::EnumChildWindows($h, { param($c,$m)
     $cls = [McpDlg]::C($c)
     if ($cls -match 'Button') { $null = $btns.Add((([McpDlg]::T($c)) -replace '&','')) }
-    elseif ($cls -match 'Edit|Static') { $t = [McpDlg]::Body($c); if ($t.Length -gt $body.Length) { $script:body = $t } }
+    elseif ($cls -match 'Edit|Static') { $t = [McpDlg]::Body($c); if ($t.Trim().Length -gt 0) { $null = $texts.Add($t) } }
     return $true }, [IntPtr]::Zero)
-  $null = $out.Add([pscustomobject]@{ title = [McpDlg]::T($h); buttons = @($btns); text = $body })
+  $null = $out.Add([pscustomobject]@{ title = [McpDlg]::T($h); buttons = @($btns); text = (@($texts) -join "\`n") })
   return $true }, [IntPtr]::Zero)
 ConvertTo-Json @($out) -Depth 4 -Compress
 `;
+
+// The write-side counterpart to DIALOG_PROBE_PS is deliberately narrow:
+// one exact #32770 title, one exact visible OK button, one exact Unity pid.
+// Values arrive through environment variables rather than interpolation so a
+// title can never become PowerShell source. The caller performs the same
+// checks before this script, and the script repeats them at the OS boundary.
+const DIALOG_CLICK_PS = `
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type @"
+using System; using System.Text; using System.Runtime.InteropServices;
+public class McpDlgClick {
+  public delegate bool E(IntPtr h, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool EnumWindows(E cb, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool EnumChildWindows(IntPtr p, E cb, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true)] public static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageTimeoutW")] public static extern IntPtr SendTextW(IntPtr h, uint m, IntPtr w, StringBuilder l, uint f, uint t, out IntPtr r);
+  public static string C(IntPtr h){ var sb=new StringBuilder(256); GetClassNameW(h,sb,256); return sb.ToString(); }
+  public static string T(IntPtr h){ var sb=new StringBuilder(512); GetWindowTextW(h,sb,512); return sb.ToString(); }
+  public static string Body(IntPtr h){ var sb=new StringBuilder(4096); IntPtr r; SendTextW(h, 13, (IntPtr)4096, sb, 2, 2000, out r); return sb.ToString(); }
+}
+"@
+$target = [int]$env:UNITY_MCP_DIALOG_PID
+$expectedTitle = $env:UNITY_MCP_DIALOG_TITLE
+$expectedButton = $env:UNITY_MCP_DIALOG_BUTTON
+$refuseTitle = $env:UNITY_MCP_DIALOG_REFUSE_TITLE
+$refuseText = $env:UNITY_MCP_DIALOG_REFUSE_TEXT
+$dialogs = New-Object System.Collections.ArrayList
+$null = [McpDlgClick]::EnumWindows({ param($h,$l)
+  $p = 0; [void][McpDlgClick]::GetWindowThreadProcessId($h, [ref]$p)
+  if ($p -ne $target -or -not [McpDlgClick]::IsWindowVisible($h)) { return $true }
+  if ([McpDlgClick]::C($h) -cne '#32770' -or [McpDlgClick]::T($h) -cne $expectedTitle) { return $true }
+  $buttons = New-Object System.Collections.ArrayList
+  $allButtons = New-Object System.Collections.ArrayList
+  $texts = New-Object System.Collections.ArrayList
+  $null = [McpDlgClick]::EnumChildWindows($h, { param($c,$m)
+    $cls = [McpDlgClick]::C($c)
+    if ($cls -match 'Button') {
+      $label = (([McpDlgClick]::T($c)) -replace '&','').Trim()
+      $null = $allButtons.Add($label)
+      if ($label -ceq $expectedButton) { $null = $buttons.Add([int64]$c) }
+    } elseif ($cls -match 'Edit|Static') {
+      $t = [McpDlgClick]::Body($c); if ($t.Trim().Length -gt 0) { $null = $texts.Add($t) }
+    }
+    return $true }, [IntPtr]::Zero)
+  $null = $dialogs.Add([pscustomobject]@{ handle = [int64]$h; buttons = @($buttons); allButtons = @($allButtons); text = (@($texts) -join "\`n") })
+  return $true }, [IntPtr]::Zero)
+$dialogCount = $dialogs.Count
+$buttonCount = if ($dialogCount -eq 1) { @($dialogs[0].buttons).Count } else { 0 }
+if ($dialogCount -ne 1) {
+  [pscustomobject]@{ clicked=$false; dialogMatches=$dialogCount; buttonMatches=$buttonCount; reason='expected exactly one matching dialog' } | ConvertTo-Json -Compress
+  exit 0
+}
+if ($buttonCount -ne 1) {
+  [pscustomobject]@{ clicked=$false; dialogMatches=$dialogCount; buttonMatches=$buttonCount; reason='expected exactly one matching button' } | ConvertTo-Json -Compress
+  exit 0
+}
+# Re-check at the OS boundary, right before the click, so a dialog swapped in
+# after the server's own check is still refused. Same rules as
+# nativeDialogClickRefusal(); missing patterns fail closed.
+$d = $dialogs[0]
+$refusal = $null
+if (-not $refuseTitle -or -not $refuseText) { $refusal = 'human-only dialog: refusal rules missing' }
+elseif (@($d.allButtons).Count -ne 1) { $refusal = 'human-only dialog: it offers more than one choice' }
+elseif ($expectedTitle -match $refuseTitle) { $refusal = 'human-only dialog: title looks like an agreement, consent or account prompt' }
+elseif ([string]::IsNullOrWhiteSpace($d.text)) { $refusal = 'human-only dialog: its text cannot be read, so it cannot be ruled out as an agreement' }
+elseif ($d.text -match $refuseText) { $refusal = 'human-only dialog: text looks like an agreement or certification' }
+if ($refusal) {
+  [pscustomobject]@{ clicked=$false; dialogMatches=$dialogCount; buttonMatches=$buttonCount; reason=$refusal } | ConvertTo-Json -Compress
+  exit 0
+}
+$result = [IntPtr]::Zero
+$sent = [McpDlgClick]::SendMessageTimeoutW([IntPtr]$dialogs[0].buttons[0], 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero, 2, 3000, [ref]$result)
+$clicked = $sent -ne [IntPtr]::Zero
+[pscustomobject]@{ clicked=$clicked; dialogMatches=$dialogCount; buttonMatches=$buttonCount; reason=$(if ($clicked) { $null } else { 'BM_CLICK timed out or failed' }) } | ConvertTo-Json -Compress
+`;
+
+/** Only the exact affirmative button used by this guarded tool is allowed. */
+export function isAllowedNativeDialogButton(button: string): boolean {
+  return button.replaceAll("&", "").trim() === "OK";
+}
+
+// Dialogs that record a person's own decision (copyright certification, terms,
+// consent, sign-in/account prompts) are human-only: the AI never answers them,
+// whatever confirm says. Kept as plain pattern text so the same rules run
+// both here and inside DIALOG_CLICK_PS (.NET regex, case-insensitive there too).
+// Japanese terms too: many editor tools in this ecosystem show Japanese
+// prompts. Keep in sync with ModalProbe.HumanOnlyTitle (C#).
+export const NATIVE_DIALOG_REFUSE_TITLE =
+  "copyright|agree|terms|consent|certif|ownership|licen[cs]e|eula|privacy|account|log ?in|log ?out|sign ?in|sign ?out|rights" +
+  "|同意|規約|著作権|権利|ライセンス|使用許諾|利用許諾|アカウント|ログイン|ログアウト|サインイン|サインアウト|プライバシー|承諾|宣誓";
+export const NATIVE_DIALOG_REFUSE_TEXT =
+  "certify|by clicking|agree|terms of|copyright|necessary rights|consent|ownership" +
+  "|同意|規約|著作権|権利|ライセンス|使用許諾|利用許諾|承諾|宣誓|保証します";
+
+/**
+ * Why native_dialog must not click this dialog, or undefined when it may.
+ * Fail closed: only a single-button notice whose text could be read and does
+ * not look like an agreement is ever clickable. An OK/Cancel decision such as
+ * VRChat's "Copyright ownership agreement" is refused even when its body text
+ * cannot be read, and so is any notice whose text cannot be read.
+ */
+export function nativeDialogClickRefusal(d: {
+  title: string;
+  buttons: string[];
+  text?: string;
+}): string | undefined {
+  if (d.buttons.length !== 1) {
+    return "human-only dialog: it offers more than one choice";
+  }
+  if (new RegExp(NATIVE_DIALOG_REFUSE_TITLE, "i").test(d.title)) {
+    return "human-only dialog: title looks like an agreement, consent or account prompt";
+  }
+  if (!d.text || d.text.trim().length === 0) {
+    return "human-only dialog: its text cannot be read, so it cannot be ruled out as an agreement";
+  }
+  if (new RegExp(NATIVE_DIALOG_REFUSE_TEXT, "i").test(d.text)) {
+    return "human-only dialog: text looks like an agreement or certification";
+  }
+  return undefined;
+}
+
+/**
+ * Click one exact native dialog button owned by one Unity process. This is an
+ * editorless OS operation so it still works while Unity's main thread is held
+ * by the modal loop. It never guesses a title/button and never clicks a
+ * negative or destructive choice.
+ */
+export function clickNativeDialogButton(
+  pid: number,
+  title: string,
+  button: string,
+): NativeDialogClickResult {
+  const base = { pid, title, button, dialogMatches: 0, buttonMatches: 0 };
+  if (process.platform !== "win32") {
+    return { ...base, clicked: false, reason: "native dialog clicking is Windows-only" };
+  }
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return { ...base, clicked: false, reason: "pid must be a positive integer" };
+  }
+  if (title.length === 0 || title.length > 256) {
+    return { ...base, clicked: false, reason: "title must contain 1..256 characters" };
+  }
+  if (!isAllowedNativeDialogButton(button)) {
+    return { ...base, clicked: false, reason: "only the exact OK button is allowed" };
+  }
+  try {
+    const r = spawnSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", DIALOG_CLICK_PS],
+      {
+        encoding: "utf8",
+        timeout: 20_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          UNITY_MCP_DIALOG_PID: String(pid),
+          UNITY_MCP_DIALOG_TITLE: title,
+          UNITY_MCP_DIALOG_BUTTON: button,
+          UNITY_MCP_DIALOG_REFUSE_TITLE: NATIVE_DIALOG_REFUSE_TITLE,
+          UNITY_MCP_DIALOG_REFUSE_TEXT: NATIVE_DIALOG_REFUSE_TEXT,
+        },
+      },
+    );
+    if (r.status !== 0 || !r.stdout) {
+      return { ...base, clicked: false, reason: "dialog click helper failed" };
+    }
+    const parsed = JSON.parse(r.stdout.trim().replace(/^﻿/, "")) as {
+      clicked?: unknown;
+      dialogMatches?: unknown;
+      buttonMatches?: unknown;
+      reason?: unknown;
+    };
+    return {
+      ...base,
+      clicked: parsed.clicked === true,
+      dialogMatches:
+        typeof parsed.dialogMatches === "number" ? parsed.dialogMatches : 0,
+      buttonMatches:
+        typeof parsed.buttonMatches === "number" ? parsed.buttonMatches : 0,
+      ...(typeof parsed.reason === "string" && parsed.reason.length > 0
+        ? { reason: parsed.reason }
+        : {}),
+    };
+  } catch {
+    return { ...base, clicked: false, reason: "dialog click helper returned invalid data" };
+  }
+}
 
 /**
  * Visible standard dialogs owned by a pid, read from the OS (no plugin

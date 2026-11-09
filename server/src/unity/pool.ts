@@ -22,7 +22,7 @@ export class ProjectPool {
    * selector keeps that meaning: while that editor is down, calls fail
    * instead of re-resolving the same words to another running project whose
    * path or name merely contains them ("Avatar" -> "Avatar2",
-   * "milfy_neo01" -> "milfy_neo01_jacket"). An editor that quits removes its
+   * "fox_neo01" -> "fox_neo01_jacket"). An editor that quits removes its
    * registry entry, so discovery alone cannot tell "not running" from "never
    * existed". No selector (the single running editor) is not remembered.
    */

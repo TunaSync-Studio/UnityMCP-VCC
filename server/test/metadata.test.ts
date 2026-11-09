@@ -32,6 +32,7 @@ const EXPECTED_ANNOTATIONS: Record<string, ToolAnnotations> = {
   vcc_project: RO,
   vpm_manage: DESTRUCTIVE,
   unity_editor: DESTRUCTIVE,
+  native_dialog: PUBLIC,
   asset_import: DESTRUCTIVE,
   vrc_menu: RO,
 };
@@ -53,7 +54,7 @@ describe("MCP metadata", () => {
 
       const listed = await client.listTools();
       const actual = Object.fromEntries(listed.tools.map((t) => [t.name, t.annotations]));
-      expect(listed.tools).toHaveLength(18);
+      expect(listed.tools).toHaveLength(19);
       expect(actual).toEqual(EXPECTED_ANNOTATIONS);
     } finally {
       await client.close().catch(() => undefined);

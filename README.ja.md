@@ -70,7 +70,7 @@ package/com.tunasync.unity-mcp  (Editor 専用 VPM/UPM パッケージ)
 - キルスイッチ: プロジェクト直下に `UnityMCP.disabled` を置く
   (メニュー: Tools > TunaSync Unity MCP > Toggle Disabled Marker)。
 
-## ツール面 (18)
+## ツール面 (19)
 
 `execute_editor_command` (C# eval・長い処理は `run_as_job`)、
 `get_editor_state` (セクション指定+`max_bytes` ガード)、`scene_query`、
@@ -103,7 +103,10 @@ animate 対象 Transform の実在まで検査して「死にメニュー」を�
 が**塞いでいるネイティブダイアログを名指し**します (タイトル・ボタン・
 「勝手に消える進捗」か「人間が答えるべき確認」かの種別まで) — plugin の
 transport thread 上の user32 プローブなので、main thread が固まっている
-まさにその時に動きます。
+まさにその時に動きます。ボタンが 1 つだけのエラー通知なら、`native_dialog`
+がその `OK` を押して閉じられます (ユーザーが承認した `confirm:true` が必須)。
+本人の判断にあたるダイアログ — ボタンが 2 つ以上あるもの、著作権の宣誓、規約・
+同意・アカウントの確認 — は `human-only` と表示され、このツールは決して押しません。
 
 旧 426 ツールの機能はすべて 出荷 412 本の **レシピ** (`recipes/`) として保存されています:
 markdown 内のフェンス付き C# ブロックを `execute_editor_command` の `code` に

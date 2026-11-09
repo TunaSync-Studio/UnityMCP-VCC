@@ -1,7 +1,7 @@
 // ProjectPool keeps a selector's meaning for the server session: an editor
 // that quits removes its registry entry, so without this a bare name like
-// "Avatar" (or "milfy_neo01") silently re-resolved to "Avatar2"
-// ("milfy_neo01_jacket") while the meant editor restarted.
+// "Avatar" (or "fox_neo01") silently re-resolved to "Avatar2"
+// ("fox_neo01_jacket") while the meant editor restarted.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -55,33 +55,33 @@ describe("ProjectPool selector meaning", () => {
   });
 
   it("a bare name keeps meaning its project while that editor restarts", () => {
-    const a = writeEntry(tmp, "a.json", "C:/VRChat/milfy_neo01", "milfy_neo01");
-    writeEntry(tmp, "b.json", "C:/VRChat/milfy_neo01_jacket", "milfy_neo01_jacket");
-    expect(pool.resolve("milfy_neo01").entry.projectName).toBe("milfy_neo01");
+    const a = writeEntry(tmp, "a.json", "C:/VRChat/fox_neo01", "fox_neo01");
+    writeEntry(tmp, "b.json", "C:/VRChat/fox_neo01_jacket", "fox_neo01_jacket");
+    expect(pool.resolve("fox_neo01").entry.projectName).toBe("fox_neo01");
     fs.rmSync(a); // the editor quit: its registry entry is gone
     const err = (() => {
       try {
-        pool.resolve("milfy_neo01");
+        pool.resolve("fox_neo01");
       } catch (e) {
         return e as UnityMcpError;
       }
       return null;
     })();
     expect(err?.code).toBe("PROJECT_NOT_FOUND");
-    expect(err?.message).toContain("C:/VRChat/milfy_neo01");
+    expect(err?.message).toContain("C:/VRChat/fox_neo01");
     // The other project is still reachable by its own name.
-    expect(pool.resolve("milfy_neo01_jacket").entry.projectName).toBe("milfy_neo01_jacket");
+    expect(pool.resolve("fox_neo01_jacket").entry.projectName).toBe("fox_neo01_jacket");
     // The editor comes back: the selector resolves to it again.
-    writeEntry(tmp, "a.json", "C:/VRChat/milfy_neo01", "milfy_neo01");
-    expect(pool.resolve("MILFY_NEO01").entry.projectName).toBe("milfy_neo01");
+    writeEntry(tmp, "a.json", "C:/VRChat/fox_neo01", "fox_neo01");
+    expect(pool.resolve("FOX_NEO01").entry.projectName).toBe("fox_neo01");
   });
 
   it("a fragment keeps meaning the project it first matched", () => {
-    const a = writeEntry(tmp, "a.json", "C:/VRChat/milfy_neo01", "milfy_neo01");
-    expect(pool.resolve("milfy").entry.projectName).toBe("milfy_neo01");
+    const a = writeEntry(tmp, "a.json", "C:/VRChat/fox_neo01", "fox_neo01");
+    expect(pool.resolve("fox").entry.projectName).toBe("fox_neo01");
     fs.rmSync(a);
-    writeEntry(tmp, "b.json", "C:/VRChat/milfy_neo01_jacket", "milfy_neo01_jacket");
-    expect(codeOf(() => pool.resolve("milfy"))).toBe("PROJECT_NOT_FOUND");
+    writeEntry(tmp, "b.json", "C:/VRChat/fox_neo01_jacket", "fox_neo01_jacket");
+    expect(codeOf(() => pool.resolve("fox"))).toBe("PROJECT_NOT_FOUND");
   });
 
   it("no selector is not remembered: it follows the single running editor", () => {

@@ -647,6 +647,11 @@ namespace TunaSync.UnityMCP.Editor
             else if (string.IsNullOrEmpty(blueprint))
             {
                 Issue(issues, "warning", "PipelineManager.blueprintId empty (new content)");
+                if (string.IsNullOrEmpty(thumbnailPath))
+                {
+                    Issue(issues, "error",
+                        "thumbnailPath is required when creating a new VRChat avatar");
+                }
             }
 
             CheckIllegalComponents(avatar, issues);
@@ -773,6 +778,35 @@ namespace TunaSync.UnityMCP.Editor
             {
                 Issue(issues, "warning",
                     "PlayerSettings.colorSpace is " + PlayerSettings.colorSpace + " (VRChat expects Linear)");
+            }
+
+            // 2.6.10: the SDK refuses to build a world until the VRChat layer
+            // table and collision matrix are set up ("You must address Layers
+            // and Collision Matrix issues"), so a dry run that skips this check
+            // passes while the real upload fails after the arm is spent (seen on
+            // a fresh template project, 2026-11-09). Read-only check via the
+            // SDK's own UpdateLayers; skipped when that type is absent.
+            Type updateLayers = HandlerUtil.FindType("UpdateLayers");
+            if (updateLayers != null)
+            {
+                const BindingFlags lf = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+                object layersOk = null;
+                object matrixOk = null;
+                try
+                {
+                    layersOk = updateLayers.GetMethod("AreLayersSetup", lf, null, Type.EmptyTypes, null)?.Invoke(null, null);
+                    matrixOk = updateLayers.GetMethod("IsCollisionLayerMatrixSetup", lf, null, Type.EmptyTypes, null)?.Invoke(null, null);
+                }
+                catch (Exception)
+                {
+                    // a diagnostics read must never break the dry run
+                }
+                if (layersOk is bool l && !l || matrixOk is bool m && !m)
+                {
+                    Issue(issues, "error",
+                        "VRChat layers / collision matrix are not set up - the SDK will refuse to build " +
+                        "(VRChat SDK control panel > Builder: 'Setup Layers for VRChat' and 'Set Collision Matrix')");
+                }
             }
 
             CheckThumbnail(thumbnailPath, issues);
@@ -918,35 +952,139 @@ namespace TunaSync.UnityMCP.Editor
                     throw new McpHandlerException(ErrorCodes.HandlerException,
                         "vrc.upload: BuildAndUpload method not found on " + iface.Name);
                 }
-                object data = Activator.CreateInstance(dataType);
-                string name = objectName ?? (content != null ? content.name : "Untitled");
-                HandlerUtil.TrySetProp(data, "Name", name);
-                if (!string.IsNullOrEmpty(blueprintId)) HandlerUtil.TrySetProp(data, "ID", blueprintId);
+                // 4. SDK credentials, in memory only. APIUser.Login uses
+                // BestHTTP while the modern VRCApi upload layer uses a separate
+                // HttpClient populated from ApiCredentials. Some SDK login
+                // paths leave the valid auth cookie only in BestHTTP's
+                // CookieJar, making the UI appear logged in while
+                // Create*Record fails with "Missing Credentials". Synchronize
+                // those two SDK-owned stores before any remote metadata call.
+                ctx.Report(7, "synchronizing SDK API credentials", "auth");
+                EnsureUploadCredentials();
+
+                // 5. Identity and metadata - remote reads only, nothing in the
+                // project is changed yet.
+                string requestedName = objectName ?? (content != null ? content.name : "Untitled");
+                string effectiveBlueprintId = blueprintId;
+                Component worldPipeline = null;
+                string worldId = null;
+                string worldUser = null;
+                string avatarUser = null;
+                object data;
+                if (target == "world")
+                {
+                    // Private worlds only, fail closed: the scene's
+                    // PipelineManager owns the identity (never reassigned), an
+                    // existing world must belong to the signed-in SDK user and
+                    // already be private, and visibility is never changed.
+                    worldPipeline = FindSceneComponent("PipelineManager");
+                    if (worldPipeline == null) throw WorldFailure("PipelineManager missing");
+                    worldId = HandlerUtil.GetFieldOrProp(worldPipeline, "blueprintId") as string;
+                    if (!string.IsNullOrEmpty(blueprintId) && blueprintId != worldId)
+                        throw WorldFailure("requested blueprint differs from scene; no identity reassignment allowed");
+                    worldUser = CurrentSdkUserId();
+                    if (string.IsNullOrEmpty(worldUser)) throw WorldFailure("SDK user not logged in");
+                    effectiveBlueprintId = worldId;
+                    if (!string.IsNullOrWhiteSpace(worldId))
+                    {
+                        // Preserve fetched Name, Description, Tags, capacities,
+                        // image/thumbnail and all other metadata, plus exact ID.
+                        ctx.Report(8, "loading existing VRChat metadata", "metadata");
+                        data = await LoadExistingContentData(dataType, target, worldId, ctx);
+                        if ((HandlerUtil.GetFieldOrProp(data, "ID") as string) != worldId ||
+                            (HandlerUtil.GetFieldOrProp(data, "AuthorId") as string) != worldUser)
+                            throw WorldFailure("world identity or ownership mismatch");
+                        if ((HandlerUtil.GetFieldOrProp(data, "ReleaseStatus") as string) != "private")
+                            throw WorldFailure("existing world is not private; no visibility transition allowed");
+                    }
+                    else
+                    {
+                        data = NewPrivateWorldData(dataType, objectName, thumbnailPath);
+                    }
+                }
+                else
+                {
+                    // An explicit ID may attach existing content; otherwise keep
+                    // the ID already stored on the avatar's PipelineManager.
+                    Component avatarPipeline = content != null
+                        ? VrcHandlers.FirstComponentByName(content, "PipelineManager")
+                        : null;
+                    if (string.IsNullOrEmpty(effectiveBlueprintId) && avatarPipeline != null)
+                    {
+                        effectiveBlueprintId = HandlerUtil.GetFieldOrProp(avatarPipeline, "blueprintId") as string;
+                    }
+                    if (!string.IsNullOrEmpty(effectiveBlueprintId))
+                    {
+                        // Never synthesize empty metadata for an update: that
+                        // could erase the remote description/tags or change
+                        // visibility.
+                        ctx.Report(8, "loading existing VRChat metadata", "metadata");
+                        data = await LoadExistingContentData(dataType, target, effectiveBlueprintId, ctx);
+                        // 2.6.10: same fail-closed rule as worlds - an existing
+                        // avatar must belong to the signed-in SDK user and
+                        // already be private. Publishing is a human decision,
+                        // so a public avatar is never updated from here.
+                        avatarUser = CurrentSdkUserId();
+                        string refusal = ExistingContentRefusal(
+                            effectiveBlueprintId,
+                            HandlerUtil.GetFieldOrProp(data, "ID") as string,
+                            HandlerUtil.GetFieldOrProp(data, "AuthorId") as string,
+                            avatarUser,
+                            HandlerUtil.GetFieldOrProp(data, "ReleaseStatus") as string);
+                        if (refusal != null) throw AvatarFailure(refusal);
+                    }
+                    else
+                    {
+                        // The SDK's Create*Record endpoints require all four
+                        // fields to be non-null. Match the SDK UI's safe
+                        // new-content defaults and keep uploads private unless
+                        // a human changes visibility later.
+                        data = Activator.CreateInstance(dataType);
+                        SetRequiredContentProperty(data, "Name", requestedName);
+                        SetRequiredContentProperty(data, "Description", string.Empty);
+                        SetRequiredContentProperty(data, "Tags", new List<string>());
+                        SetRequiredContentProperty(data, "ReleaseStatus", "private");
+                    }
+                }
+                ValidateRequiredContentMetadata(data);
+                string name = HandlerUtil.GetFieldOrProp(data, "Name") as string ?? requestedName;
                 object[] args = BuildArgs(bau, content, data, dataType, thumbnailPath, ctx);
 
-                // 4. Human arm gate (M-1, 2026-08-12 audit): the plugin is the
+                // 6. Re-verify after every awaited preparation step, before the
+                // arm is spent: the scene identity and the signed-in SDK user
+                // must not have changed underneath this job.
+                if (target == "world" &&
+                    ((HandlerUtil.GetFieldOrProp(worldPipeline, "blueprintId") as string) != worldId ||
+                     CurrentSdkUserId() != worldUser))
+                    throw WorldFailure("scene identity or SDK user changed during preparation");
+                if (target == "avatar" && avatarUser != null && CurrentSdkUserId() != avatarUser)
+                    throw AvatarFailure("SDK user changed during preparation");
+
+                // 7. Human arm gate (M-1, 2026-08-12 audit): the plugin is the
                 // SINGLE consumer of the arm, so a client that skips the npm
                 // server still cannot publish through vrc.upload without it.
-                // Claimed here - after the SDK builder and every type it needs
-                // are found, before the first change (blueprintId pin) and the
-                // build - so a setup failure above (control panel not logged
-                // in, SDK types missing) leaves the arm in place, while every
-                // attempt that goes on to build uses it up (L-3: one arm = one
-                // attempt, also across editors). Run refused arm-less calls
-                // already (read-only); this claim is what counts. The server
-                // only pre-checks the arm and submits real uploads only to
-                // plugins that advertise "vrcUploadArmClaim". (2.6.7-2.6.8
-                // checked the arm in Run but left consuming it to the server,
-                // which did so before submitting the job - so every real upload
-                // was refused.)
+                // Claimed here - after the SDK builder, credentials, metadata
+                // and the checks above are ready, before the first change
+                // (blueprintId pin) and the build - so a failed preparation
+                // (control panel not logged in, SDK types missing, metadata,
+                // ownership or visibility refused) leaves the arm in place,
+                // while every attempt that goes on to build uses it up (L-3:
+                // one arm = one attempt, also across editors). Run refused
+                // arm-less calls already (read-only); this claim is what
+                // counts. The server only pre-checks the arm and submits real
+                // uploads only to plugins that advertise "vrcUploadArmClaim".
+                // (2.6.7-2.6.8 checked the arm in Run but left consuming it to
+                // the server, which did so before submitting the job - so every
+                // real upload was refused.)
                 ClaimArmOrThrow();
 
-                // 5. Pin blueprintId on the PipelineManager when provided.
-                if (!string.IsNullOrEmpty(blueprintId))
+                // 8. Pin blueprintId on the avatar's PipelineManager when
+                // provided. Worlds never get a new identity (checked above).
+                if (target == "avatar" && !string.IsNullOrEmpty(blueprintId))
                 {
-                    Component pipeline = target == "avatar" && content != null
+                    Component pipeline = content != null
                         ? VrcHandlers.FirstComponentByName(content, "PipelineManager")
-                        : FindSceneComponent("PipelineManager");
+                        : null;
                     if (pipeline != null &&
                         (HandlerUtil.TrySetField(pipeline, "blueprintId", blueprintId) ||
                          HandlerUtil.TrySetProp(pipeline, "blueprintId", blueprintId)))
@@ -955,33 +1093,48 @@ namespace TunaSync.UnityMCP.Editor
                     }
                 }
 
-                // 6. Phase markers via builder events (best effort). Once upload
+                // 9. Phase markers via builder events (best effort). Once upload
                 // starts we are past the point of no return.
                 TryHookEvent(builder, iface, "OnSdkBuildStart",
                     () => ctx.Report(20, "building bundle", "build"));
                 TryHookEvent(builder, iface, "OnSdkUploadStart",
                     () => ctx.Report(60, "uploading (point of no return)", "upload"));
 
-                // 7. BuildAndUpload(...) with the arguments matched above.
+                // 10. BuildAndUpload(...) with the arguments matched above.
                 ctx.Report(10, "starting build+upload", "build");
-                object taskObj;
+                // 2.6.10: the control panel polls the blueprintId every second.
+                // For new content it sees the fresh ID before GetWorld/GetAvatar
+                // can find it, decides "we do not own this", clears the ID, and
+                // the copyright step then fails with "Failed to agree" (seen
+                // 2026-10-25). The panel's own Upload button disables the UI for
+                // the duration; do the same and restore it afterwards.
+                bool? uiWas = SetBuilderUiEnabled(builder, false);
+                Task task;
                 try
                 {
-                    taskObj = bau.Invoke(builder, args);
+                    object taskObj;
+                    try
+                    {
+                        taskObj = bau.Invoke(builder, args);
+                    }
+                    catch (TargetInvocationException tie)
+                    {
+                        Exception inner = tie.InnerException ?? tie;
+                        throw new McpHandlerException(ErrorCodes.HandlerException,
+                            "vrc.upload: BuildAndUpload threw: " + inner.GetType().Name + ": " + inner.Message);
+                    }
+                    task = taskObj as Task;
+                    if (task == null)
+                    {
+                        throw new McpHandlerException(ErrorCodes.HandlerException,
+                            "vrc.upload: BuildAndUpload did not return a Task");
+                    }
+                    await task;
                 }
-                catch (TargetInvocationException tie)
+                finally
                 {
-                    Exception inner = tie.InnerException ?? tie;
-                    throw new McpHandlerException(ErrorCodes.HandlerException,
-                        "vrc.upload: BuildAndUpload threw: " + inner.GetType().Name + ": " + inner.Message);
+                    if (uiWas.HasValue) SetBuilderUiEnabled(builder, uiWas.Value);
                 }
-                Task task = taskObj as Task;
-                if (task == null)
-                {
-                    throw new McpHandlerException(ErrorCodes.HandlerException,
-                        "vrc.upload: BuildAndUpload did not return a Task");
-                }
-                await task;
 
                 object uploadResult = null;
                 Type taskType = task.GetType();
@@ -991,15 +1144,35 @@ namespace TunaSync.UnityMCP.Editor
                     if (rp != null) uploadResult = rp.GetValue(task, null);
                 }
                 object resultId = HandlerUtil.GetFieldOrProp(uploadResult, "ID");
+                string finalId = resultId != null ? resultId.ToString() : effectiveBlueprintId;
+                if (string.IsNullOrWhiteSpace(finalId))
+                {
+                    // New content: BuildAndUpload returns a plain Task, and the
+                    // fresh ID is only on the PipelineManager the SDK assigned
+                    // (2026-11-09: the result reported "" for a new avatar/world).
+                    Component idSource = target == "world"
+                        ? (worldPipeline ?? FindSceneComponent("PipelineManager"))
+                        : (content != null ? VrcHandlers.FirstComponentByName(content, "PipelineManager") : null);
+                    finalId = idSource != null
+                        ? HandlerUtil.GetFieldOrProp(idSource, "blueprintId") as string
+                        : null;
+                }
 
                 ctx.Report(100, "upload complete", "upload");
-                return new JObject
+                JObject done = new JObject
                 {
                     ["uploaded"] = true,
                     ["target"] = target,
                     ["name"] = name,
-                    ["blueprintId"] = resultId != null ? resultId.ToString() : blueprintId,
+                    ["blueprintId"] = finalId ?? "",
                 };
+                if (string.IsNullOrWhiteSpace(effectiveBlueprintId))
+                {
+                    // New content: the SDK wrote the new ID into the scene /
+                    // prefab in memory only. Saving is left to the user.
+                    done["note"] = "new content: save the scene so the new blueprintId is kept for the next upload";
+                }
+                return done;
             }
             catch (OperationCanceledException)
             {
@@ -1015,6 +1188,297 @@ namespace TunaSync.UnityMCP.Editor
                     "vrc.upload failed: " + ex.GetType().Name + ": " + ex.Message +
                     " (SDK control panel must be open and logged in; API surface may need adjustment)");
             }
+        }
+
+        private static McpHandlerException WorldFailure(string detail)
+        {
+            return new McpHandlerException(ErrorCodes.InvalidParams,
+                "vrc.upload: fail-closed private world precondition: " + detail);
+        }
+
+        /// <summary>
+        /// Set the SDK builder's UiEnabled (property or field) and return the
+        /// previous value, or null when this SDK has no such member.
+        /// </summary>
+        private static bool? SetBuilderUiEnabled(object builder, bool value)
+        {
+            try
+            {
+                if (builder == null) return null;
+                object prev = HandlerUtil.GetFieldOrProp(builder, "UiEnabled");
+                if (!(prev is bool)) return null;
+                if (HandlerUtil.TrySetProp(builder, "UiEnabled", value) ||
+                    HandlerUtil.TrySetField(builder, "UiEnabled", value))
+                {
+                    return (bool)prev;
+                }
+                return null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static McpHandlerException AvatarFailure(string detail)
+        {
+            return new McpHandlerException(ErrorCodes.InvalidParams,
+                "vrc.upload: fail-closed private avatar precondition: " + detail);
+        }
+
+        /// <summary>
+        /// Why updating existing content must be refused, or null when it may
+        /// go ahead: the fetched record must be exactly the requested ID, owned
+        /// by the signed-in SDK user, and already private. Anything unknown
+        /// (no user, no author, no status) refuses.
+        /// </summary>
+        internal static string ExistingContentRefusal(
+            string requestedId, string fetchedId, string authorId, string sdkUserId, string releaseStatus)
+        {
+            if (string.IsNullOrEmpty(sdkUserId)) return "SDK user not logged in";
+            if (string.IsNullOrEmpty(requestedId) || fetchedId != requestedId)
+                return "content identity mismatch";
+            if (string.IsNullOrEmpty(authorId) || authorId != sdkUserId)
+                return "content is not owned by the signed-in SDK user";
+            if (releaseStatus != "private")
+                return "existing content is not private; no update of public content allowed";
+            return null;
+        }
+
+        private static string CurrentSdkUserId()
+        {
+            Type apiUser = HandlerUtil.FindType("VRC.Core.APIUser");
+            PropertyInfo current = apiUser == null ? null : apiUser.GetProperty("CurrentUser",
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+            object user = current == null ? null : current.GetValue(null, null);
+            return user == null ? null : HandlerUtil.GetFieldOrProp(user, "id") as string;
+        }
+
+        private static object NewPrivateWorldData(Type dataType, string objectName, string thumbnailPath)
+        {
+            if (string.IsNullOrWhiteSpace(objectName))
+                throw WorldFailure("new world requires an explicit name");
+            if (string.IsNullOrEmpty(thumbnailPath) || !File.Exists(thumbnailPath))
+                throw WorldFailure("new world requires an existing thumbnail");
+            object data = Activator.CreateInstance(dataType);
+            PropertyInfo release = dataType.GetProperty("ReleaseStatus");
+            PropertyInfo worldName = dataType.GetProperty("Name");
+            PropertyInfo capacity = dataType.GetProperty("Capacity");
+            PropertyInfo recommended = dataType.GetProperty("RecommendedCapacity");
+            PropertyInfo description = dataType.GetProperty("Description");
+            PropertyInfo tags = dataType.GetProperty("Tags");
+            if (release == null || !release.CanWrite || release.PropertyType != typeof(string) ||
+                worldName == null || !worldName.CanWrite || worldName.PropertyType != typeof(string) ||
+                capacity == null || !capacity.CanWrite || capacity.PropertyType != typeof(int) ||
+                recommended == null || !recommended.CanWrite || recommended.PropertyType != typeof(int) ||
+                description == null || !description.CanWrite || description.PropertyType != typeof(string) ||
+                tags == null || !tags.CanWrite || tags.PropertyType != typeof(List<string>))
+                throw WorldFailure("required private-world metadata properties unavailable");
+            release.SetValue(data, "private", null);
+            worldName.SetValue(data, objectName, null);
+            // SDK 3.10.5's new-world UI defaults (builder lines 1529-30).
+            // VRCApi.CreateNewWorld forwards capacities without clamping.
+            capacity.SetValue(data, 32, null);
+            recommended.SetValue(data, 16, null);
+            description.SetValue(data, string.Empty, null);
+            tags.SetValue(data, new List<string>(), null);
+            if ((HandlerUtil.GetFieldOrProp(data, "ReleaseStatus") as string) != "private")
+                throw WorldFailure("private metadata could not be established");
+            object maxValue = HandlerUtil.GetFieldOrProp(data, "Capacity");
+            object recommendedValue = HandlerUtil.GetFieldOrProp(data, "RecommendedCapacity");
+            if (!(maxValue is int) || !(recommendedValue is int) ||
+                (int)maxValue <= 0 || (int)recommendedValue <= 0 ||
+                (int)recommendedValue > (int)maxValue)
+                throw WorldFailure("new-world capacities could not be established");
+            return data;
+        }
+
+        private static void EnsureUploadCredentials()
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public |
+                                       BindingFlags.NonPublic;
+            Type credentialsType = HandlerUtil.FindType("VRC.Core.ApiCredentials");
+            if (credentialsType == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: SDK ApiCredentials type not found");
+            }
+
+            MethodInfo getAuth = credentialsType.GetMethod("GetAuthToken", flags);
+            MethodInfo getTfa = credentialsType.GetMethod("GetTwoFactorAuthToken", flags);
+            string authToken = getAuth != null ? getAuth.Invoke(null, null) as string : null;
+            if (!string.IsNullOrEmpty(authToken)) return;
+
+            Type cookieJarType = HandlerUtil.FindType("BestHTTP.Cookies.CookieJar");
+            MethodInfo getAll = cookieJarType != null
+                ? cookieJarType.GetMethod("GetAll", flags, null, Type.EmptyTypes, null)
+                : null;
+            IEnumerable cookies = getAll != null ? getAll.Invoke(null, null) as IEnumerable : null;
+            string tfaToken = getTfa != null ? getTfa.Invoke(null, null) as string : null;
+            if (cookies != null)
+            {
+                foreach (object cookie in cookies)
+                {
+                    if (cookie == null) continue;
+                    string name = HandlerUtil.GetFieldOrProp(cookie, "Name") as string;
+                    string value = HandlerUtil.GetFieldOrProp(cookie, "Value") as string;
+                    string domain = HandlerUtil.GetFieldOrProp(cookie, "Domain") as string;
+                    if (string.IsNullOrEmpty(value) || !IsVrchatApiCookieDomain(domain)) continue;
+                    if (name == "auth") authToken = value;
+                    else if (name == "twoFactorAuth" && string.IsNullOrEmpty(tfaToken)) tfaToken = value;
+                }
+            }
+
+            if (string.IsNullOrEmpty(authToken))
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: SDK login is visible but no usable VRChat auth cookie is available; " +
+                    "sign in again in the SDK Account panel before arming an upload");
+            }
+
+            Type apiUserType = HandlerUtil.FindType("VRC.Core.APIUser");
+            PropertyInfo currentUserProperty = apiUserType != null
+                ? apiUserType.GetProperty("CurrentUser", flags)
+                : null;
+            object currentUser = currentUserProperty != null
+                ? currentUserProperty.GetValue(null, null)
+                : null;
+            string username = currentUser != null
+                ? HandlerUtil.GetFieldOrProp(currentUser, "username") as string
+                : null;
+            string humanName = currentUser != null
+                ? HandlerUtil.GetFieldOrProp(currentUser, "displayName") as string
+                : null;
+            if (string.IsNullOrEmpty(username)) username = "vrchat-user";
+            if (string.IsNullOrEmpty(humanName)) humanName = username;
+
+            Type[] signature = { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string) };
+            MethodInfo set = credentialsType.GetMethod("Set", flags, null, signature, null);
+            if (set == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: SDK ApiCredentials.Set signature not found");
+            }
+            set.Invoke(null, new object[]
+            {
+                humanName, username, "vrchat", authToken, tfaToken ?? string.Empty
+            });
+
+            string synchronized = getAuth != null ? getAuth.Invoke(null, null) as string : null;
+            if (string.IsNullOrEmpty(synchronized))
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: SDK API credential synchronization failed");
+            }
+        }
+
+        private static bool IsVrchatApiCookieDomain(string domain)
+        {
+            if (string.IsNullOrEmpty(domain)) return false;
+            return string.Equals(domain.TrimStart('.'), "api.vrchat.cloud",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void SetRequiredContentProperty(object data, string propertyName, object value)
+        {
+            if (!HandlerUtil.TrySetProp(data, propertyName, value) ||
+                HandlerUtil.GetFieldOrProp(data, propertyName) == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: SDK content data is missing writable property '" +
+                    propertyName + "'");
+            }
+        }
+
+        private static void ValidateRequiredContentMetadata(object data)
+        {
+            string[] required = { "Name", "Description", "Tags", "ReleaseStatus" };
+            for (int i = 0; i < required.Length; i++)
+            {
+                if (HandlerUtil.GetFieldOrProp(data, required[i]) == null)
+                {
+                    throw new McpHandlerException(ErrorCodes.HandlerException,
+                        "vrc.upload: SDK content metadata '" + required[i] +
+                        "' is null; refusing an unsafe upload");
+                }
+            }
+        }
+
+        private static async Task<object> LoadExistingContentData(Type dataType, string target,
+            string blueprintId, JobContext ctx)
+        {
+            Type apiType = HandlerUtil.FindType("VRC.SDKBase.Editor.Api.VRCApi");
+            if (apiType == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: VRCApi type not found while loading existing metadata");
+            }
+
+            string getterName = target == "avatar" ? "GetAvatar" : "GetWorld";
+            MethodInfo getter = null;
+            MethodInfo[] methods = apiType.GetMethods(BindingFlags.Static | BindingFlags.Public);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                Type returnType = methods[i].ReturnType;
+                if (methods[i].Name == getterName && returnType.IsGenericType &&
+                    returnType.GetGenericTypeDefinition() == typeof(Task<>) &&
+                    returnType.GetGenericArguments()[0] == dataType)
+                {
+                    getter = methods[i];
+                    break;
+                }
+            }
+            if (getter == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: VRCApi." + getterName + " method not found");
+            }
+
+            ParameterInfo[] prms = getter.GetParameters();
+            object[] args = new object[prms.Length];
+            for (int i = 0; i < prms.Length; i++)
+            {
+                Type pt = prms[i].ParameterType;
+                if (pt == typeof(string)) args[i] = blueprintId;
+                else if (pt == typeof(bool)) args[i] = true;
+                else if (pt == typeof(System.Threading.CancellationToken)) args[i] = ctx.Token;
+                else if (prms[i].HasDefaultValue) args[i] = prms[i].DefaultValue;
+                else
+                {
+                    throw new McpHandlerException(ErrorCodes.HandlerException,
+                        "vrc.upload: unsupported parameter on VRCApi." + getterName +
+                        ": " + prms[i].Name);
+                }
+            }
+
+            object taskObject;
+            try
+            {
+                taskObject = getter.Invoke(null, args);
+            }
+            catch (TargetInvocationException tie)
+            {
+                Exception inner = tie.InnerException ?? tie;
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: could not load existing metadata: " + inner.Message);
+            }
+            Task task = taskObject as Task;
+            if (task == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: VRCApi." + getterName + " did not return a Task");
+            }
+            await task;
+
+            PropertyInfo resultProperty = task.GetType().GetProperty("Result",
+                BindingFlags.Instance | BindingFlags.Public);
+            object result = resultProperty != null ? resultProperty.GetValue(task, null) : null;
+            if (result == null)
+            {
+                throw new McpHandlerException(ErrorCodes.HandlerException,
+                    "vrc.upload: VRCApi." + getterName + " returned no metadata");
+            }
+            return result;
         }
 
         private static async Task<object> PollForBuilder(Type panelType, Type iface, JobContext ctx)

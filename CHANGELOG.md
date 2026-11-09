@@ -4,6 +4,52 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Versions tag the
 repo as `v2.x.y`; server-only releases explicitly note the unchanged Unity
 package version.
 
+## [2.6.10] - 2026-11-09
+
+Unity plugin + npm server release. Publish both together. The arm gate is
+exactly 2.6.9's (the plugin claims the arm; the server only pre-checks).
+
+### Added
+- `native_dialog` tool (19th): clicks the exact `OK` button of exactly one
+  single-button native notice owned by the Unity editor of an exact project,
+  only with a fresh user-approved `confirm:true`; never Cancel/No/Discard.
+- **Human-only dialogs are never answered**, whatever `confirm` says: any
+  dialog with more than one button, or whose title/text is a copyright
+  certification, terms, consent, license or account prompt (for example the
+  VRChat SDK "Copyright ownership agreement"). Checked by the server and again
+  right before the click. The user answers those in the editor.
+- `unity_health_check` / BUSY_MODAL report such dialogs as `kind: human-only`
+  with advice to ask the user.
+
+### Fixed
+- Native dialog body text was never captured (always empty); non-ASCII button
+  labels came back garbled.
+
+### Changed (vrc_upload, plugin side)
+- Existing avatars are now fail-closed like worlds: the record must be the
+  requested ID, owned by the signed-in SDK user and already private.
+  Updating public content from vrc_upload is refused.
+- The SDK builder UI is disabled during BuildAndUpload (as the control panel's
+  own Upload button does). New content no longer loses its fresh ID mid-upload
+  ("Failed to agree"). New content reports a note to save the scene.
+- The upload result now reports the new blueprintId for new content (it was
+  empty).
+- World dry run now fails when the VRChat layers / collision matrix are not
+  set up; the SDK refuses to build such a world, so the real upload used to
+  fail only after the arm was spent.
+- SDK credentials are synchronized (BestHTTP cookie -> ApiCredentials) before
+  any remote metadata call ("Missing Credentials" while the SDK looks signed in).
+- Existing content: remote metadata is loaded and kept; never sent empty.
+  New content: Name/Description/Tags set, release status `private`; a new
+  avatar needs a thumbnail (dry run reports it).
+- Worlds are private-only and fail closed: the scene's PipelineManager owns
+  the identity, an existing world must belong to the signed-in user and be
+  private, a new world needs an explicit name and an existing thumbnail and
+  gets capacity 32 / recommended 16 (SDK UI defaults).
+- The arm is claimed after credentials, metadata and these checks are ready
+  and re-verified, before the first change (avatar blueprintId pin) and the
+  build, so a failed preparation keeps the arm.
+
 ## [2.6.9] - 2026-11-02
 
 Unity plugin + npm server release. Publish both together: a real
@@ -68,7 +114,7 @@ Unity plugin + npm server release. Publish both together: a real
   registered but down, the call says so instead of picking another; and a
   selector keeps meaning the project it first resolved to for the rest of
   the server session - an editor that quits removes its registry entry, so
-  a bare `milfy_neo01` used to fall through to `milfy_neo01_jacket` while
+  a bare `fox_neo01` used to fall through to `fox_neo01_jacket` while
   it restarted.
 - **macOS/Linux defaults**: the server's default registry and arm folder
   now match the plugin's `LocalApplicationData` (`$XDG_DATA_HOME`, else
@@ -307,7 +353,7 @@ pass (`BUSY_MODAL` short-circuit hunt on a live avatar project).
   quit/cleanup fallback introduced in 2.6.1 matched command lines by
   substring, so AssetImportWorkers (same exe, same `-projectPath`,
   spawned exactly when imports are churning) and path-prefix sibling
-  projects (`milfy_neo01` vs `milfy_neo01_jacket`) could be picked —
+  projects (`fox_neo01` vs `fox_neo01_jacket`) could be picked —
   quitting a worker reported fake success; force-killing one mid-import
   is the Library-corruption case the tool itself warns about. The scan
   now extracts the `-projectPath` value and requires an exact normalized
